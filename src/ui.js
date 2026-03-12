@@ -137,9 +137,77 @@ export function renderHtml() {
       }
       .profile-id { font-family: var(--mono); font-size: 0.86rem; margin-top: 6px; }
       .profile-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-      .metric { display: grid; gap: 4px; }
+      .metric { display: grid; gap: 6px; min-width: 180px; }
+      .metric-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+      }
       .metric strong { font-size: 1.05rem; }
+      .metric-label {
+        font-size: 0.78rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .metric-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .metric-bar {
+        position: relative;
+        overflow: hidden;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(67, 52, 38, 0.12);
+      }
+      .metric-bar-fill {
+        height: 100%;
+        border-radius: inherit;
+        transition: width 180ms ease;
+      }
+      .metric-bar.high .metric-bar-fill {
+        background: linear-gradient(90deg, #1f7a57, #43b581);
+      }
+      .metric-bar.medium .metric-bar-fill {
+        background: linear-gradient(90deg, #b97728, #e3aa58);
+      }
+      .metric-bar.low .metric-bar-fill {
+        background: linear-gradient(90deg, #a94739, #d96a5b);
+      }
+      .metric-bar.unknown {
+        background:
+          repeating-linear-gradient(
+            135deg,
+            rgba(67, 52, 38, 0.08),
+            rgba(67, 52, 38, 0.08) 8px,
+            rgba(255, 255, 255, 0.35) 8px,
+            rgba(255, 255, 255, 0.35) 16px
+          );
+      }
       .metric small { color: var(--muted); }
+      .countdown {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(14, 107, 88, 0.08);
+        color: var(--accent);
+        font-size: 0.76rem;
+        font-family: var(--mono);
+      }
+      .countdown.soon {
+        background: rgba(187, 98, 54, 0.1);
+        color: var(--accent-2);
+      }
+      .countdown.expired {
+        background: rgba(160, 47, 47, 0.1);
+        color: var(--danger);
+      }
       .actions { display: flex; flex-wrap: wrap; gap: 8px; }
       .error-text { color: var(--danger); font-size: 0.88rem; margin-top: 6px; }
       .empty { color: var(--muted); padding-top: 12px; }
@@ -242,6 +310,49 @@ export function renderHtml() {
         return new Date(ms).toLocaleString("zh-CN", { hour12: false });
       }
 
+      function formatCountdown(ts) {
+        if (!ts) {
+          return { text: "countdown n/a", tone: "" };
+        }
+
+        const targetMs = ts > 10_000_000_000 ? ts : ts * 1000;
+        const diffMs = targetMs - Date.now();
+        if (diffMs <= 0) {
+          return { text: "已到重置时间", tone: "expired" };
+        }
+
+        const totalSeconds = Math.floor(diffMs / 1000);
+        const days = Math.floor(totalSeconds / 86400);
+        const hours = Math.floor((totalSeconds % 86400) / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+
+        let text = "";
+        if (days > 0) {
+          text = days + "天 " + String(hours).padStart(2, "0") + "小时";
+        } else if (hours > 0) {
+          text = hours + "小时 " + String(minutes).padStart(2, "0") + "分钟";
+        } else if (minutes > 0) {
+          text = minutes + "分钟 " + String(seconds).padStart(2, "0") + "秒";
+        } else {
+          text = seconds + "秒";
+        }
+
+        return {
+          text: "倒计时 " + text,
+          tone: diffMs <= 6 * 3600 * 1000 ? "soon" : "",
+        };
+      }
+
+      function updateCountdowns() {
+        document.querySelectorAll("[data-reset-at]").forEach((node) => {
+          const resetAt = Number(node.getAttribute("data-reset-at"));
+          const countdown = formatCountdown(Number.isFinite(resetAt) ? resetAt : null);
+          node.textContent = countdown.text;
+          node.className = "countdown" + (countdown.tone ? " " + countdown.tone : "");
+        });
+      }
+
       function pill(label, tone = "") {
         const node = document.createElement("span");
         node.className = "pill" + (tone ? " " + tone : "");
@@ -283,12 +394,45 @@ export function renderHtml() {
       function renderMetric(windowData) {
         const wrapper = document.createElement("div");
         wrapper.className = "metric";
+        const head = document.createElement("div");
+        head.className = "metric-head";
         const strong = document.createElement("strong");
-        strong.textContent = windowData.remainingPercent == null ? "n/a" : windowData.remainingPercent + "%";
+        strong.textContent = windowData.remainingPercent == null ? "n/a" : windowData.remainingPercent + "% left";
+        const label = document.createElement("span");
+        label.className = "metric-label";
+        label.textContent = windowData.label || "n/a";
+        head.appendChild(strong);
+        head.appendChild(label);
+
+        const bar = document.createElement("div");
+        const remaining = windowData.remainingPercent;
+        const width = remaining == null ? 0 : Math.max(0, Math.min(100, remaining));
+        const tone = remaining == null ? "unknown" : width >= 60 ? "high" : width >= 30 ? "medium" : "low";
+        bar.className = "metric-bar " + tone;
+        bar.setAttribute("role", "progressbar");
+        bar.setAttribute("aria-label", (windowData.label || "usage") + " remaining quota");
+        bar.setAttribute("aria-valuemin", "0");
+        bar.setAttribute("aria-valuemax", "100");
+        bar.setAttribute("aria-valuenow", String(width));
+        const fill = document.createElement("div");
+        fill.className = "metric-bar-fill";
+        fill.style.width = width + "%";
+        bar.appendChild(fill);
+
+        const meta = document.createElement("div");
+        meta.className = "metric-meta";
         const small = document.createElement("small");
-        small.textContent = (windowData.label || "n/a") + " · reset " + formatTime(windowData.resetAt);
-        wrapper.appendChild(strong);
-        wrapper.appendChild(small);
+        small.textContent = "reset " + formatTime(windowData.resetAt);
+        const countdown = document.createElement("span");
+        countdown.setAttribute("data-reset-at", windowData.resetAt == null ? "" : String(windowData.resetAt));
+        const countdownState = formatCountdown(windowData.resetAt);
+        countdown.className = "countdown" + (countdownState.tone ? " " + countdownState.tone : "");
+        countdown.textContent = countdownState.text;
+        meta.appendChild(small);
+        meta.appendChild(countdown);
+        wrapper.appendChild(head);
+        wrapper.appendChild(bar);
+        wrapper.appendChild(meta);
         return wrapper;
       }
 
@@ -552,6 +696,7 @@ export function renderHtml() {
       syncButton.addEventListener("click", syncConfig);
       addButton.addEventListener("click", addAccount);
       refreshState();
+      setInterval(updateCountdowns, 1000);
     </script>
   </body>
 </html>`;
