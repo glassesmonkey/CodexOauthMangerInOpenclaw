@@ -6,7 +6,28 @@ import { syncCodexIntoConfig } from "../src/config-store.js";
 import { openBrowser } from "../src/index.js";
 import { recommendProfileOrder } from "../src/order.js";
 
-test("recommendProfileOrder prefers secondary remaining percent", () => {
+test("recommendProfileOrder prefers earlier secondary reset time", () => {
+  const order = recommendProfileOrder([
+    {
+      profileId: "openai-codex:alpha",
+      currentOrderIndex: 1,
+      primary: { remainingPercent: 90, resetAt: 200 },
+      secondary: { remainingPercent: 40, resetAt: 350 },
+      error: null,
+    },
+    {
+      profileId: "openai-codex:beta",
+      currentOrderIndex: 0,
+      primary: { remainingPercent: 55, resetAt: 150 },
+      secondary: { remainingPercent: 95, resetAt: 500 },
+      error: null,
+    },
+  ]);
+
+  assert.deepEqual(order, ["openai-codex:alpha", "openai-codex:beta"]);
+});
+
+test("recommendProfileOrder uses secondary remaining percent when resets match", () => {
   const order = recommendProfileOrder([
     {
       profileId: "openai-codex:alpha",
@@ -19,7 +40,7 @@ test("recommendProfileOrder prefers secondary remaining percent", () => {
       profileId: "openai-codex:beta",
       currentOrderIndex: 0,
       primary: { remainingPercent: 55, resetAt: 150 },
-      secondary: { remainingPercent: 95, resetAt: 350 },
+      secondary: { remainingPercent: 95, resetAt: 400 },
       error: null,
     },
   ]);

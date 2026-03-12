@@ -35,6 +35,12 @@ export function recommendProfileOrder(rows) {
         return leftErrored ? 1 : -1;
       }
 
+      // Prefer the profile whose long-window quota resets sooner to reduce waste.
+      const secondaryReset = compareNullableAsc(left.secondary.resetAt, right.secondary.resetAt);
+      if (secondaryReset !== 0) {
+        return secondaryReset;
+      }
+
       const secondary = compareNullableDesc(left.secondary.remainingPercent, right.secondary.remainingPercent);
       if (secondary !== 0) {
         return secondary;
@@ -45,12 +51,9 @@ export function recommendProfileOrder(rows) {
         return primary;
       }
 
-      const reset = compareNullableAsc(
-        left.secondary.resetAt ?? left.primary.resetAt,
-        right.secondary.resetAt ?? right.primary.resetAt,
-      );
-      if (reset !== 0) {
-        return reset;
+      const primaryReset = compareNullableAsc(left.primary.resetAt, right.primary.resetAt);
+      if (primaryReset !== 0) {
+        return primaryReset;
       }
 
       if (left.currentOrderIndex !== right.currentOrderIndex) {
