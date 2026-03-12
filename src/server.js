@@ -1,6 +1,7 @@
 import http from "node:http";
 import { LoginManager, applyOrder, loadDashboardState, renameProfile, syncConfig } from "./state.js";
 import { renderHtml } from "./ui.js";
+import { createUsageFetch } from "./usage-fetch.js";
 
 function sendJson(response, status, payload) {
   response.writeHead(status, {
@@ -30,6 +31,27 @@ async function readBody(request) {
   return text ? JSON.parse(text) : {};
 }
 
+function parseBoolean(value) {
+  return value === true || value === "true" || value === "1";
+}
+
+function resolveUsageProxyConfig(url, body = {}) {
+  const bodyProxyUrl = typeof body.usageProxyUrl === "string" ? body.usageProxyUrl.trim() : "";
+  const queryProxyUrl = (url.searchParams.get("usageProxyUrl") || "").trim();
+
+  return {
+    enabled: parseBoolean(body.usageProxyEnabled) || parseBoolean(url.searchParams.get("usageProxyEnabled")),
+    url: bodyProxyUrl || queryProxyUrl || "",
+  };
+}
+
+function createStateDeps(url, body) {
+  const usageProxy = resolveUsageProxyConfig(url, body);
+  return {
+    fetchImpl: createUsageFetch(usageProxy),
+  };
+}
+
 export async function startDashboardServer(options = {}) {
   const html = renderHtml();
   const loginManager = new LoginManager();
@@ -45,19 +67,20 @@ export async function startDashboardServer(options = {}) {
       }
 
       if (request.method === "GET" && url.pathname === "/api/state") {
-        sendJson(response, 200, await loadDashboardState(options));
+        sendJson(response, 200, await loadDashboardState(options, createStateDeps(url)));
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/api/apply-order") {
         const body = await readBody(request);
         const order = Array.isArray(body.order) ? body.order.filter((entry) => typeof entry === "string") : [];
-        sendJson(response, 200, await applyOrder(options, order));
+        sendJson(response, 200, await applyOrder(options, order, createStateDeps(url, body)));
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/api/sync-config") {
-        sendJson(response, 200, await syncConfig(options));
+        const body = await readBody(request);
+        sendJson(response, 200, await syncConfig(options, createStateDeps(url, body)));
         return;
       }
 
@@ -69,7 +92,7 @@ export async function startDashboardServer(options = {}) {
           sendJson(response, 400, { error: "Both profileId and nextProfileId are required." });
           return;
         }
-        sendJson(response, 200, await renameProfile(options, profileId, nextProfileId));
+        sendJson(response, 200, await renameProfile(options, profileId, nextProfileId, createStateDeps(url, body)));
         return;
       }
 

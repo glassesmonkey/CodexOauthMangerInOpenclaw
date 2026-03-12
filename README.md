@@ -41,6 +41,14 @@ node src/index.js --config /path/to/openclaw.json --agent-dir /path/to/agent
 node src/index.js --port 3100
 ```
 
+## Usage request proxy
+
+The dashboard can route the Codex usage request through a proxy from the UI:
+
+- Toggle "获取额度时通过代理"
+- Optionally set a custom proxy URL
+- Leave the proxy URL empty to fall back to `HTTPS_PROXY` / `HTTP_PROXY`
+
 ## Copy to another machine
 
 Copy this whole directory:

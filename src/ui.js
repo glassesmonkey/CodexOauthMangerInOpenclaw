@@ -287,11 +287,23 @@ export function renderHtml() {
               <input id="refreshIntervalInput" class="input" type="number" min="0" step="1" value="0" />
               <span class="field-note">填 0 关闭自动刷新。</span>
             </label>
+            <label class="field">
+              <span class="field-label">额度请求代理 URL</span>
+              <input id="usageProxyUrlInput" class="input" type="text" value="" placeholder="http://127.0.0.1:7890" />
+              <span class="field-note">留空时走 HTTPS_PROXY / HTTP_PROXY。</span>
+            </label>
             <label class="toggle">
               <input id="autoApplyToggle" type="checkbox" />
               <span class="toggle-text">
                 <strong>刷新后自动应用推荐顺序</strong>
                 <span class="field-note">只有推荐顺序和当前生效顺序不一致时才会写入。</span>
+              </span>
+            </label>
+            <label class="toggle">
+              <input id="usageProxyToggle" type="checkbox" />
+              <span class="toggle-text">
+                <strong>获取额度时通过代理</strong>
+                <span class="field-note">只影响对 ChatGPT 用量接口的请求，不影响本地文件读写。</span>
               </span>
             </label>
           </div>
@@ -352,6 +364,8 @@ export function renderHtml() {
         refreshTimer: null,
         refreshIntervalSeconds: 0,
         autoApplyRecommended: false,
+        usageProxyEnabled: false,
+        usageProxyUrl: "",
       };
 
       const statusText = document.getElementById("statusText");
@@ -360,7 +374,9 @@ export function renderHtml() {
       const syncButton = document.getElementById("syncButton");
       const addButton = document.getElementById("addButton");
       const refreshIntervalInput = document.getElementById("refreshIntervalInput");
+      const usageProxyUrlInput = document.getElementById("usageProxyUrlInput");
       const autoApplyToggle = document.getElementById("autoApplyToggle");
+      const usageProxyToggle = document.getElementById("usageProxyToggle");
       const agentValue = document.getElementById("agentValue");
       const authValue = document.getElementById("authValue");
       const configValue = document.getElementById("configValue");
@@ -375,6 +391,8 @@ export function renderHtml() {
       const loginStatus = document.getElementById("loginStatus");
       const REFRESH_INTERVAL_STORAGE_KEY = "codex-auth-dashboard.refresh-interval-seconds";
       const AUTO_APPLY_STORAGE_KEY = "codex-auth-dashboard.auto-apply-after-refresh";
+      const USAGE_PROXY_ENABLED_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-enabled";
+      const USAGE_PROXY_URL_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-url";
 
       function formatTime(ts) {
         if (!ts) return "-";
@@ -455,6 +473,8 @@ export function renderHtml() {
         try {
           window.localStorage.setItem(REFRESH_INTERVAL_STORAGE_KEY, String(appState.refreshIntervalSeconds));
           window.localStorage.setItem(AUTO_APPLY_STORAGE_KEY, String(appState.autoApplyRecommended));
+          window.localStorage.setItem(USAGE_PROXY_ENABLED_STORAGE_KEY, String(appState.usageProxyEnabled));
+          window.localStorage.setItem(USAGE_PROXY_URL_STORAGE_KEY, appState.usageProxyUrl);
         } catch {
           // Ignore localStorage failures in restricted browsers.
         }
@@ -462,7 +482,9 @@ export function renderHtml() {
 
       function syncAutomationControls() {
         refreshIntervalInput.value = String(appState.refreshIntervalSeconds);
+        usageProxyUrlInput.value = appState.usageProxyUrl;
         autoApplyToggle.checked = appState.autoApplyRecommended;
+        usageProxyToggle.checked = appState.usageProxyEnabled;
       }
 
       function loadAutomationSettings() {
@@ -472,9 +494,13 @@ export function renderHtml() {
             appState.refreshIntervalSeconds = Math.floor(storedInterval);
           }
           appState.autoApplyRecommended = window.localStorage.getItem(AUTO_APPLY_STORAGE_KEY) === "true";
+          appState.usageProxyEnabled = window.localStorage.getItem(USAGE_PROXY_ENABLED_STORAGE_KEY) === "true";
+          appState.usageProxyUrl = window.localStorage.getItem(USAGE_PROXY_URL_STORAGE_KEY) || "";
         } catch {
           appState.refreshIntervalSeconds = 0;
           appState.autoApplyRecommended = false;
+          appState.usageProxyEnabled = false;
+          appState.usageProxyUrl = "";
         }
         syncAutomationControls();
       }
@@ -501,6 +527,25 @@ export function renderHtml() {
           data.recommendedOrder.length > 0 &&
           !arraysEqual(data.recommendedOrder, data.currentEffectiveOrder),
         );
+      }
+
+      function buildUsageProxySettings() {
+        return {
+          usageProxyEnabled: appState.usageProxyEnabled,
+          usageProxyUrl: appState.usageProxyUrl.trim(),
+        };
+      }
+
+      function buildStateUrl() {
+        const params = new URLSearchParams();
+        if (appState.usageProxyEnabled) {
+          params.set("usageProxyEnabled", "1");
+        }
+        if (appState.usageProxyUrl.trim()) {
+          params.set("usageProxyUrl", appState.usageProxyUrl.trim());
+        }
+        const query = params.toString();
+        return query ? "/api/state?" + query : "/api/state";
       }
 
       function setBusy(busy, text) {
@@ -583,7 +628,10 @@ export function renderHtml() {
         const response = await fetch(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload || {}),
+          body: JSON.stringify({
+            ...(payload || {}),
+            ...buildUsageProxySettings(),
+          }),
         });
         const data = await response.json();
         if (!response.ok) {
@@ -721,7 +769,7 @@ export function renderHtml() {
         clearRefreshTimer();
         setBusy(true, "正在刷新...");
         try {
-          const response = await fetch("/api/state");
+          const response = await fetch(buildStateUrl());
           const data = await response.json();
           if (!response.ok) throw new Error(data.error || "load failed");
           render(data);
@@ -858,6 +906,23 @@ export function renderHtml() {
         statusText.textContent = appState.autoApplyRecommended
           ? "已开启刷新后自动应用推荐顺序"
           : "已关闭刷新后自动应用推荐顺序";
+      });
+
+      usageProxyUrlInput.addEventListener("change", () => {
+        appState.usageProxyUrl = usageProxyUrlInput.value.trim();
+        syncAutomationControls();
+        persistAutomationSettings();
+        statusText.textContent = appState.usageProxyUrl
+          ? "已更新额度请求代理 URL"
+          : "已清空额度请求代理 URL，将回退到环境变量代理";
+      });
+
+      usageProxyToggle.addEventListener("change", () => {
+        appState.usageProxyEnabled = usageProxyToggle.checked;
+        persistAutomationSettings();
+        statusText.textContent = appState.usageProxyEnabled
+          ? "已开启额度请求代理"
+          : "已关闭额度请求代理";
       });
 
       refreshButton.addEventListener("click", () => refreshState());

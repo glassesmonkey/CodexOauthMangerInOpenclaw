@@ -5,6 +5,7 @@ import { applyOrderToAuthStore, renameProfileInAuthStore } from "../src/auth-sto
 import { syncCodexIntoConfig } from "../src/config-store.js";
 import { openBrowser, parseArgs } from "../src/index.js";
 import { buildConfigAudit, buildWarnings, recommendProfileOrder } from "../src/order.js";
+import { createUsageFetch, resolveUsageProxyUrl } from "../src/usage-fetch.js";
 
 test("recommendProfileOrder prefers earlier secondary reset time", () => {
   const order = recommendProfileOrder([
@@ -211,4 +212,44 @@ test("buildWarnings flags config order mismatch as informational warning", () =>
       "openclaw.json auth.order differs from auth-profiles.json order; runtime uses auth-profiles.json.",
     ),
   );
+});
+
+test("resolveUsageProxyUrl prefers explicit URL and falls back to env", () => {
+  assert.equal(
+    resolveUsageProxyUrl(
+      { enabled: true, url: "http://127.0.0.1:7890" },
+      { HTTPS_PROXY: "http://env-proxy:8080" },
+    ),
+    "http://127.0.0.1:7890",
+  );
+
+  assert.equal(
+    resolveUsageProxyUrl(
+      { enabled: true, url: "" },
+      { HTTPS_PROXY: "http://env-proxy:8080" },
+    ),
+    "http://env-proxy:8080",
+  );
+
+  assert.equal(resolveUsageProxyUrl({ enabled: false, url: "http://ignored:1" }, {}), null);
+});
+
+test("createUsageFetch attaches dispatcher when proxy is enabled", async () => {
+  const calls = [];
+  const proxyFetch = createUsageFetch(
+    { enabled: true, url: "http://127.0.0.1:7890" },
+    {
+      fetchImpl: async (url, init) => {
+        calls.push({ url, init });
+        return { ok: true };
+      },
+    },
+  );
+
+  await proxyFetch("https://chatgpt.com/backend-api/wham/usage", { method: "GET" });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://chatgpt.com/backend-api/wham/usage");
+  assert.equal(calls[0].init.method, "GET");
+  assert.ok(calls[0].init.dispatcher);
 });

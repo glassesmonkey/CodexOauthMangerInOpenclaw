@@ -167,12 +167,12 @@ async function updateOpenClawConfig(options, updater) {
   });
 }
 
-export async function applyOrder(options, order) {
+export async function applyOrder(options, order, deps = {}) {
   await updateAuthStore(options, (store) => applyOrderToAuthStore(store, order));
-  return await loadDashboardState(options);
+  return await loadDashboardState(options, deps);
 }
 
-export async function syncConfig(options) {
+export async function syncConfig(options, deps = {}) {
   const context = resolvePaths(options);
   const store = readAuthStore(context.authStorePath);
   const runtimeProfileIds = listCodexProfiles(store).map((entry) => entry.profileId);
@@ -182,16 +182,16 @@ export async function syncConfig(options) {
   await updateOpenClawConfig(options, (config) =>
     syncCodexIntoConfig(config, runtimeProfileIds, preferredOrder),
   );
-  return await loadDashboardState(options);
+  return await loadDashboardState(options, deps);
 }
 
-export async function renameProfile(options, profileId, nextProfileId) {
+export async function renameProfile(options, profileId, nextProfileId, deps = {}) {
   await updateAuthStore(options, (store) => renameProfileInAuthStore(store, profileId, nextProfileId));
   const context = resolvePaths(options);
   if (context.configExists) {
     await updateOpenClawConfig(options, (config) => renameProfileInConfig(config, profileId, nextProfileId));
   }
-  return await loadDashboardState(options);
+  return await loadDashboardState(options, deps);
 }
 
 export async function saveLoggedInProfile(options, profileId, credentials) {
