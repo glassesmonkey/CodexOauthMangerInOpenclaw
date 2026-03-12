@@ -66,6 +66,56 @@ export function renderHtml() {
         gap: 10px;
         margin-top: 18px;
       }
+      .automation-panel {
+        margin-top: 18px;
+        padding: 14px 16px;
+        border: 1px solid rgba(67, 52, 38, 0.1);
+        background: rgba(255,255,255,0.52);
+        border-radius: 14px;
+      }
+      .automation-grid {
+        display: grid;
+        gap: 14px;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      }
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+      .field-label {
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+      .field-note {
+        font-size: 0.78rem;
+        color: var(--muted);
+      }
+      .input {
+        width: 100%;
+        appearance: none;
+        border: 1px solid rgba(67, 52, 38, 0.14);
+        border-radius: 12px;
+        padding: 10px 12px;
+        background: rgba(255,255,255,0.9);
+        color: var(--text);
+        font: inherit;
+      }
+      .toggle {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        padding-top: 6px;
+      }
+      .toggle input {
+        margin: 3px 0 0;
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+      }
+      .toggle-text {
+        display: grid;
+        gap: 4px;
+      }
       button {
         appearance: none;
         border: 0;
@@ -229,6 +279,23 @@ export function renderHtml() {
           <button id="syncButton" class="button-secondary" type="button">补齐 openclaw.json</button>
           <button id="addButton" class="button-secondary" type="button">新增账号</button>
         </div>
+        <div class="automation-panel">
+          <div class="meta-label">自动化</div>
+          <div class="automation-grid">
+            <label class="field">
+              <span class="field-label">自动刷新间隔（秒）</span>
+              <input id="refreshIntervalInput" class="input" type="number" min="0" step="1" value="0" />
+              <span class="field-note">填 0 关闭自动刷新。</span>
+            </label>
+            <label class="toggle">
+              <input id="autoApplyToggle" type="checkbox" />
+              <span class="toggle-text">
+                <strong>刷新后自动应用推荐顺序</strong>
+                <span class="field-note">只有推荐顺序和当前生效顺序不一致时才会写入。</span>
+              </span>
+            </label>
+          </div>
+        </div>
         <div class="meta-grid">
           <div class="meta-box"><div class="meta-label">Agent</div><div id="agentValue" class="meta-value">-</div></div>
           <div class="meta-box"><div class="meta-label">Auth Store</div><div id="authValue" class="meta-value">-</div></div>
@@ -283,6 +350,9 @@ export function renderHtml() {
         loginTaskId: null,
         popup: null,
         manualPromptShown: false,
+        refreshTimer: null,
+        refreshIntervalSeconds: 0,
+        autoApplyRecommended: false,
       };
 
       const statusText = document.getElementById("statusText");
@@ -290,6 +360,8 @@ export function renderHtml() {
       const applyButton = document.getElementById("applyButton");
       const syncButton = document.getElementById("syncButton");
       const addButton = document.getElementById("addButton");
+      const refreshIntervalInput = document.getElementById("refreshIntervalInput");
+      const autoApplyToggle = document.getElementById("autoApplyToggle");
       const agentValue = document.getElementById("agentValue");
       const authValue = document.getElementById("authValue");
       const configValue = document.getElementById("configValue");
@@ -303,6 +375,8 @@ export function renderHtml() {
       const rows = document.getElementById("rows");
       const emptyState = document.getElementById("emptyState");
       const loginStatus = document.getElementById("loginStatus");
+      const REFRESH_INTERVAL_STORAGE_KEY = "codex-auth-dashboard.refresh-interval-seconds";
+      const AUTO_APPLY_STORAGE_KEY = "codex-auth-dashboard.auto-apply-after-refresh";
 
       function formatTime(ts) {
         if (!ts) return "-";
@@ -358,6 +432,77 @@ export function renderHtml() {
         node.className = "pill" + (tone ? " " + tone : "");
         node.textContent = label;
         return node;
+      }
+
+      function arraysEqual(left, right) {
+        if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+          return false;
+        }
+        for (let index = 0; index < left.length; index += 1) {
+          if (left[index] !== right[index]) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      function clearRefreshTimer() {
+        if (appState.refreshTimer) {
+          window.clearTimeout(appState.refreshTimer);
+          appState.refreshTimer = null;
+        }
+      }
+
+      function persistAutomationSettings() {
+        try {
+          window.localStorage.setItem(REFRESH_INTERVAL_STORAGE_KEY, String(appState.refreshIntervalSeconds));
+          window.localStorage.setItem(AUTO_APPLY_STORAGE_KEY, String(appState.autoApplyRecommended));
+        } catch {
+          // Ignore localStorage failures in restricted browsers.
+        }
+      }
+
+      function syncAutomationControls() {
+        refreshIntervalInput.value = String(appState.refreshIntervalSeconds);
+        autoApplyToggle.checked = appState.autoApplyRecommended;
+      }
+
+      function loadAutomationSettings() {
+        try {
+          const storedInterval = Number(window.localStorage.getItem(REFRESH_INTERVAL_STORAGE_KEY));
+          if (Number.isFinite(storedInterval) && storedInterval >= 0) {
+            appState.refreshIntervalSeconds = Math.floor(storedInterval);
+          }
+          appState.autoApplyRecommended = window.localStorage.getItem(AUTO_APPLY_STORAGE_KEY) === "true";
+        } catch {
+          appState.refreshIntervalSeconds = 0;
+          appState.autoApplyRecommended = false;
+        }
+        syncAutomationControls();
+      }
+
+      function scheduleAutoRefresh() {
+        clearRefreshTimer();
+        if (appState.refreshIntervalSeconds <= 0) {
+          return;
+        }
+        appState.refreshTimer = window.setTimeout(() => {
+          if (appState.busy) {
+            scheduleAutoRefresh();
+            return;
+          }
+          void refreshState("自动刷新完成");
+        }, appState.refreshIntervalSeconds * 1000);
+      }
+
+      function shouldAutoApplyRecommendedOrder(data) {
+        return Boolean(
+          appState.autoApplyRecommended &&
+          data &&
+          Array.isArray(data.recommendedOrder) &&
+          data.recommendedOrder.length > 0 &&
+          !arraysEqual(data.recommendedOrder, data.currentEffectiveOrder),
+        );
       }
 
       function setBusy(busy, text) {
@@ -576,15 +721,25 @@ export function renderHtml() {
       }
 
       async function refreshState(okMessage = "刷新完成") {
+        clearRefreshTimer();
         setBusy(true, "正在刷新...");
         try {
           const response = await fetch("/api/state");
           const data = await response.json();
           if (!response.ok) throw new Error(data.error || "load failed");
           render(data);
-          setBusy(false, okMessage);
+          if (shouldAutoApplyRecommendedOrder(data)) {
+            statusText.textContent = "正在自动应用推荐顺序...";
+            const nextState = await postJson("/api/apply-order", { order: data.recommendedOrder });
+            render(nextState);
+            setBusy(false, okMessage === "自动刷新完成" ? "自动刷新后已应用推荐顺序" : "刷新后已应用推荐顺序");
+          } else {
+            setBusy(false, okMessage);
+          }
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error));
+        } finally {
+          scheduleAutoRefresh();
         }
       }
 
@@ -691,10 +846,28 @@ export function renderHtml() {
         }
       }
 
+      refreshIntervalInput.addEventListener("change", () => {
+        const nextInterval = Math.max(0, Math.floor(Number(refreshIntervalInput.value) || 0));
+        appState.refreshIntervalSeconds = nextInterval;
+        syncAutomationControls();
+        persistAutomationSettings();
+        scheduleAutoRefresh();
+        statusText.textContent = nextInterval > 0 ? "已设置每 " + nextInterval + " 秒自动刷新" : "已关闭自动刷新";
+      });
+
+      autoApplyToggle.addEventListener("change", () => {
+        appState.autoApplyRecommended = autoApplyToggle.checked;
+        persistAutomationSettings();
+        statusText.textContent = appState.autoApplyRecommended
+          ? "已开启刷新后自动应用推荐顺序"
+          : "已关闭刷新后自动应用推荐顺序";
+      });
+
       refreshButton.addEventListener("click", () => refreshState());
       applyButton.addEventListener("click", applyRecommendedOrder);
       syncButton.addEventListener("click", syncConfig);
       addButton.addEventListener("click", addAccount);
+      loadAutomationSettings();
       refreshState();
       setInterval(updateCountdowns, 1000);
     </script>

@@ -33,6 +33,7 @@ async function readBody(request) {
 export async function startDashboardServer(options = {}) {
   const html = renderHtml();
   const loginManager = new LoginManager();
+  const port = Number.isInteger(options.port) && options.port > 0 ? options.port : 3001;
 
   const server = http.createServer(async (request, response) => {
     try {
@@ -115,7 +116,7 @@ export async function startDashboardServer(options = {}) {
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(options.port || 0, "127.0.0.1", () => resolve());
+    server.listen(port, "127.0.0.1", () => resolve());
   });
 
   const address = server.address();

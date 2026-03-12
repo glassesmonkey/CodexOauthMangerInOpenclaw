@@ -25,6 +25,8 @@ npm install
 npm run dev
 ```
 
+By default the dashboard listens on `http://127.0.0.1:3001`.
+
 The dashboard auto-detects:
 
 - `~/.openclaw/openclaw.json`
@@ -36,6 +38,7 @@ Override when needed:
 node src/index.js --agent main --open
 node src/index.js --state-dir /path/to/.openclaw --agent work
 node src/index.js --config /path/to/openclaw.json --agent-dir /path/to/agent
+node src/index.js --port 3100
 ```
 
 ## Copy to another machine

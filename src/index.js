@@ -6,9 +6,9 @@ import { pathToFileURL } from "node:url";
 import { startDashboardServer } from "./server.js";
 import { resolvePaths } from "./paths.js";
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = {
-    port: 0,
+    port: 3001,
     open: false,
   };
 
@@ -37,7 +37,7 @@ function parseArgs(argv) {
       continue;
     }
     if (arg === "--port" && next) {
-      args.port = Number(next) || 0;
+      args.port = Number(next) || 3001;
       index += 1;
       continue;
     }

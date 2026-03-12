@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { applyOrderToAuthStore, renameProfileInAuthStore } from "../src/auth-store.js";
 import { syncCodexIntoConfig } from "../src/config-store.js";
-import { openBrowser } from "../src/index.js";
+import { openBrowser, parseArgs } from "../src/index.js";
 import { recommendProfileOrder } from "../src/order.js";
 
 test("recommendProfileOrder prefers earlier secondary reset time", () => {
@@ -170,4 +170,18 @@ test("openBrowser tolerates missing open command", async () => {
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /Could not open browser automatically/);
   assert.match(warnings[0], /ENOENT/);
+});
+
+test("parseArgs defaults to port 3001", () => {
+  const args = parseArgs(["node", "src/index.js"]);
+
+  assert.equal(args.port, 3001);
+  assert.equal(args.open, false);
+});
+
+test("parseArgs accepts explicit port override", () => {
+  const args = parseArgs(["node", "src/index.js", "--port", "3100", "--open"]);
+
+  assert.equal(args.port, 3100);
+  assert.equal(args.open, true);
 });
