@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { applyOrderToAuthStore, renameProfileInAuthStore } from "../src/auth-store.js";
 import { syncCodexIntoConfig } from "../src/config-store.js";
 import { openBrowser, parseArgs } from "../src/index.js";
-import { recommendProfileOrder } from "../src/order.js";
+import { buildConfigAudit, buildWarnings, recommendProfileOrder } from "../src/order.js";
 
 test("recommendProfileOrder prefers earlier secondary reset time", () => {
   const order = recommendProfileOrder([
@@ -184,4 +184,31 @@ test("parseArgs accepts explicit port override", () => {
 
   assert.equal(args.port, 3100);
   assert.equal(args.open, true);
+});
+
+test("buildWarnings flags config order mismatch as informational warning", () => {
+  const audit = buildConfigAudit({
+    runtimeProfileIds: ["openai-codex:a", "openai-codex:b"],
+    storedOrder: ["openai-codex:a", "openai-codex:b"],
+    configProfileIds: ["openai-codex:a", "openai-codex:b"],
+    configOrder: ["openai-codex:b", "openai-codex:a"],
+  });
+
+  const warnings = buildWarnings({
+    rows: [
+      { profileId: "openai-codex:a" },
+      { profileId: "openai-codex:b" },
+    ],
+    audit,
+    context: {
+      authStoreExists: true,
+      configExists: true,
+    },
+  });
+
+  assert.ok(
+    warnings.includes(
+      "openclaw.json auth.order differs from auth-profiles.json order; runtime uses auth-profiles.json.",
+    ),
+  );
 });

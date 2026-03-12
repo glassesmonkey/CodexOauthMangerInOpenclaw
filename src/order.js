@@ -26,6 +26,18 @@ function compareNullableAsc(left, right) {
   return left - right;
 }
 
+function arraysEqual(left, right) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function recommendProfileOrder(rows) {
   return rows
     .toSorted((left, right) => {
@@ -80,6 +92,11 @@ export function buildConfigAudit({ runtimeProfileIds, storedOrder, configProfile
     missingStoredOrderProfiles: runtimeProfileIds.filter(
       (profileId) => storedOrder.length > 0 && !storedOrderSet.has(profileId),
     ),
+    orderMismatch:
+      storedOrder.length > 0 &&
+      configOrder.length > 0 &&
+      runtimeProfileIds.length > 0 &&
+      !arraysEqual(storedOrder, configOrder),
   };
 }
 
@@ -106,6 +123,9 @@ export function buildWarnings({ rows, audit, context }) {
   }
   if (audit.missingStoredOrderProfiles.length > 0) {
     warnings.push(`auth-profiles.json order omits: ${audit.missingStoredOrderProfiles.join(", ")}`);
+  }
+  if (audit.orderMismatch) {
+    warnings.push("openclaw.json auth.order differs from auth-profiles.json order; runtime uses auth-profiles.json.");
   }
 
   const defaultNames = rows

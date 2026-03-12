@@ -311,7 +311,6 @@ export function renderHtml() {
           <div><div class="meta-label">当前生效顺序</div><div id="effectiveOrder" class="order-line"></div></div>
           <div><div class="meta-label">推荐顺序</div><div id="recommendedOrder" class="order-line"></div></div>
           <div><div class="meta-label">auth-profiles.json 顺序</div><div id="storedOrder" class="order-line"></div></div>
-          <div><div class="meta-label">openclaw.json 顺序</div><div id="configOrder" class="order-line"></div></div>
         </div>
       </section>
 
@@ -369,7 +368,6 @@ export function renderHtml() {
       const effectiveOrder = document.getElementById("effectiveOrder");
       const recommendedOrder = document.getElementById("recommendedOrder");
       const storedOrder = document.getElementById("storedOrder");
-      const configOrder = document.getElementById("configOrder");
       const warnings = document.getElementById("warnings");
       const notes = document.getElementById("notes");
       const rows = document.getElementById("rows");
@@ -714,7 +712,6 @@ export function renderHtml() {
         renderOrder(effectiveOrder, data.currentEffectiveOrder);
         renderOrder(recommendedOrder, data.recommendedOrder);
         renderOrder(storedOrder, data.storedOrder);
-        renderOrder(configOrder, data.configOrder);
         renderMessages(warnings, data.warnings, "warn");
         renderMessages(notes, data.notes, "ok");
         renderRows(data);
