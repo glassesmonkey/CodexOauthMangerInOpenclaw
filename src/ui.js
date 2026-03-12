@@ -471,46 +471,60 @@ export function renderHtml() {
         }
       }
 
+      function maybeNavigatePopup(url) {
+        if (!url || !appState.popup || appState.popup.closed) return;
+        try {
+          if (appState.popup.location.href === "about:blank") {
+            appState.popup.location = url;
+          }
+        } catch {
+          // Ignore cross-origin popup access errors while OAuth is in progress.
+        }
+      }
+
       async function pollLogin(taskId) {
         appState.loginTaskId = taskId;
-        while (appState.loginTaskId === taskId) {
-          const response = await fetch("/api/login-status?taskId=" + encodeURIComponent(taskId));
-          const task = await response.json();
-          if (!response.ok) {
-            renderLoginTask({ profileId: "-", status: "failed", error: task.error || "login status failed" });
-            appState.loginTaskId = null;
-            return;
-          }
-          renderLoginTask(task);
-
-          if (task.authUrl && appState.popup && !appState.popup.closed && appState.popup.location.href === "about:blank") {
-            appState.popup.location = task.authUrl;
-          }
-
-          if (task.status === "awaiting_manual_code" && !appState.manualPromptShown) {
-            appState.manualPromptShown = true;
-            const code = window.prompt(task.promptMessage || "Paste authorization code or redirect URL");
-            if (code && code.trim()) {
-              await postJson("/api/login/manual-code", { taskId, code });
+        try {
+          while (appState.loginTaskId === taskId) {
+            const response = await fetch("/api/login-status?taskId=" + encodeURIComponent(taskId));
+            const task = await response.json();
+            if (!response.ok) {
+              renderLoginTask({ profileId: "-", status: "failed", error: task.error || "login status failed" });
+              appState.loginTaskId = null;
+              return;
             }
-          }
-
-          if (task.status === "completed") {
-            appState.loginTaskId = null;
-            appState.manualPromptShown = false;
             renderLoginTask(task);
-            await refreshState("新增账号完成");
-            return;
-          }
+            maybeNavigatePopup(task.authUrl);
 
-          if (task.status === "failed") {
-            appState.loginTaskId = null;
-            appState.manualPromptShown = false;
-            setBusy(false, task.error || "新增账号失败");
-            return;
-          }
+            if (task.status === "awaiting_manual_code" && !appState.manualPromptShown) {
+              appState.manualPromptShown = true;
+              const code = window.prompt(task.promptMessage || "Paste authorization code or redirect URL");
+              if (code && code.trim()) {
+                await postJson("/api/login/manual-code", { taskId, code });
+              }
+            }
 
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+            if (task.status === "completed") {
+              appState.loginTaskId = null;
+              appState.manualPromptShown = false;
+              renderLoginTask(task);
+              await refreshState("新增账号完成");
+              return;
+            }
+
+            if (task.status === "failed") {
+              appState.loginTaskId = null;
+              appState.manualPromptShown = false;
+              setBusy(false, task.error || "新增账号失败");
+              return;
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+        } catch (error) {
+          appState.loginTaskId = null;
+          appState.manualPromptShown = false;
+          setBusy(false, String(error instanceof Error ? error.message : error));
         }
       }
 
@@ -525,9 +539,7 @@ export function renderHtml() {
         try {
           const task = await postJson("/api/login/start", { profileId });
           renderLoginTask(task);
-          if (task.authUrl && appState.popup && !appState.popup.closed) {
-            appState.popup.location = task.authUrl;
-          }
+          maybeNavigatePopup(task.authUrl);
           setBusy(false, "等待完成 OAuth 登录...");
           void pollLogin(task.taskId);
         } catch (error) {

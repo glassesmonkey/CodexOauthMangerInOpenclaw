@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import process from "node:process";
+import { pathToFileURL } from "node:url";
 import { startDashboardServer } from "./server.js";
 import { resolvePaths } from "./paths.js";
 
@@ -47,22 +49,43 @@ function parseArgs(argv) {
   return args;
 }
 
-async function openBrowser(url) {
-  const command =
-    process.platform === "darwin"
-      ? "open"
-      : process.platform === "win32"
-        ? "cmd"
-        : "xdg-open";
-  const commandArgs = process.platform === "win32" ? ["/c", "start", "", url] : [url];
-  const child = spawn(command, commandArgs, {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+function getOpenCommand(platform) {
+  if (platform === "darwin") {
+    return { command: "open", args: [] };
+  }
+  if (platform === "win32") {
+    return { command: "cmd", args: ["/c", "start", ""] };
+  }
+  return { command: "xdg-open", args: [] };
 }
 
-async function main() {
+export async function openBrowser(url, options = {}) {
+  const platform = options.platform ?? process.platform;
+  const spawnImpl = options.spawn ?? spawn;
+  const logger = options.logger ?? console;
+  const { command, args } = getOpenCommand(platform);
+  const commandArgs = [...args, url];
+
+  await new Promise((resolve) => {
+    const child = spawnImpl(command, commandArgs, {
+      detached: true,
+      stdio: "ignore",
+    });
+
+    child.once("error", (error) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      logger.warn?.(`Could not open browser automatically: ${detail}`);
+      resolve();
+    });
+
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
+export async function main() {
   const args = parseArgs(process.argv);
   const context = resolvePaths(args);
   const { url } = await startDashboardServer(args);
@@ -78,7 +101,12 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+const isEntrypoint =
+  process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
+
+if (isEntrypoint) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}

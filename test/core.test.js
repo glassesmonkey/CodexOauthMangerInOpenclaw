@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { applyOrderToAuthStore, renameProfileInAuthStore } from "../src/auth-store.js";
 import { syncCodexIntoConfig } from "../src/config-store.js";
+import { openBrowser } from "../src/index.js";
 import { recommendProfileOrder } from "../src/order.js";
 
 test("recommendProfileOrder prefers secondary remaining percent", () => {
@@ -121,4 +123,30 @@ test("syncCodexIntoConfig adds missing profiles and order entries", () => {
     "openai-codex:work",
     "openai-codex:personal",
   ]);
+});
+
+test("openBrowser tolerates missing open command", async () => {
+  const warnings = [];
+
+  await openBrowser("http://127.0.0.1:3000", {
+    logger: {
+      warn(message) {
+        warnings.push(message);
+      },
+    },
+    spawn() {
+      const child = new EventEmitter();
+      child.unref = () => {};
+      queueMicrotask(() => {
+        const error = new Error("spawn xdg-open ENOENT");
+        error.code = "ENOENT";
+        child.emit("error", error);
+      });
+      return child;
+    },
+  });
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /Could not open browser automatically/);
+  assert.match(warnings[0], /ENOENT/);
 });
