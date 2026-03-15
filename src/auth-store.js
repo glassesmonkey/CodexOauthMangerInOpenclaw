@@ -137,6 +137,43 @@ export function renameProfileInAuthStore(store, profileId, nextProfileId) {
   return next;
 }
 
+export function deleteProfileFromAuthStore(store, profileId) {
+  if (!store.profiles[profileId]) {
+    throw new Error(`Profile "${profileId}" was not found in auth-profiles.json.`);
+  }
+
+  const next = structuredClone(store);
+  delete next.profiles[profileId];
+
+  if (next.order?.[CODEX_PROVIDER]) {
+    const filteredOrder = next.order[CODEX_PROVIDER].filter((entry) => entry !== profileId);
+    if (filteredOrder.length > 0) {
+      next.order[CODEX_PROVIDER] = filteredOrder;
+    } else {
+      delete next.order[CODEX_PROVIDER];
+      if (Object.keys(next.order).length === 0) {
+        next.order = undefined;
+      }
+    }
+  }
+
+  if (next.lastGood?.[CODEX_PROVIDER] === profileId) {
+    delete next.lastGood[CODEX_PROVIDER];
+    if (Object.keys(next.lastGood).length === 0) {
+      next.lastGood = undefined;
+    }
+  }
+
+  if (next.usageStats?.[profileId]) {
+    delete next.usageStats[profileId];
+    if (Object.keys(next.usageStats).length === 0) {
+      next.usageStats = undefined;
+    }
+  }
+
+  return next;
+}
+
 export function upsertProfileCredential(store, profileId, credential, options = {}) {
   const next = structuredClone(store);
   next.profiles[profileId] = credential;

@@ -26,6 +26,24 @@ function compareNullableAsc(left, right) {
   return left - right;
 }
 
+function compareExhaustedWindow(left, right) {
+  const leftExhausted = left === 0;
+  const rightExhausted = right === 0;
+  if (leftExhausted === rightExhausted) {
+    return 0;
+  }
+  return leftExhausted ? 1 : -1;
+}
+
+function compareUnavailableProfile(left, right) {
+  const leftUnavailable = left.primary.remainingPercent === 0 || left.secondary.remainingPercent === 0;
+  const rightUnavailable = right.primary.remainingPercent === 0 || right.secondary.remainingPercent === 0;
+  if (leftUnavailable === rightUnavailable) {
+    return 0;
+  }
+  return leftUnavailable ? 1 : -1;
+}
+
 function arraysEqual(left, right) {
   if (left.length !== right.length) {
     return false;
@@ -45,6 +63,19 @@ export function recommendProfileOrder(rows) {
       const rightErrored = Boolean(right.error);
       if (leftErrored !== rightErrored) {
         return leftErrored ? 1 : -1;
+      }
+
+      const availability = compareUnavailableProfile(left, right);
+      if (availability !== 0) {
+        return availability;
+      }
+
+      const secondaryAvailability = compareExhaustedWindow(
+        left.secondary.remainingPercent,
+        right.secondary.remainingPercent,
+      );
+      if (secondaryAvailability !== 0) {
+        return secondaryAvailability;
       }
 
       // Prefer the profile whose long-window quota resets sooner to reduce waste.

@@ -261,9 +261,145 @@ export function renderHtml() {
       .actions { display: flex; flex-wrap: wrap; gap: 8px; }
       .error-text { color: var(--danger); font-size: 0.88rem; margin-top: 6px; }
       .empty { color: var(--muted); padding-top: 12px; }
+      .modal-shell {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        display: grid;
+        place-items: center;
+        padding: 20px;
+      }
+      .modal-shell[hidden] {
+        display: none;
+      }
+      .modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(43, 36, 31, 0.42);
+        backdrop-filter: blur(10px);
+      }
+      .modal-card {
+        position: relative;
+        width: min(560px, 100%);
+        padding: 26px;
+        border-radius: 26px;
+        border: 1px solid rgba(67, 52, 38, 0.12);
+        background:
+          radial-gradient(circle at top right, rgba(255, 214, 170, 0.34), transparent 34%),
+          linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(255, 247, 239, 0.96));
+        box-shadow: 0 32px 80px rgba(50, 38, 25, 0.22);
+      }
+      .modal-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: flex-start;
+      }
+      .modal-title {
+        margin: 4px 0 0;
+        font-size: clamp(1.45rem, 3vw, 2rem);
+        line-height: 1.08;
+      }
+      .modal-copy {
+        margin: 10px 0 0;
+        color: var(--muted);
+      }
+      .icon-button {
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.8);
+        border: 1px solid rgba(67, 52, 38, 0.1);
+        color: var(--muted);
+        font-size: 1.2rem;
+        line-height: 1;
+      }
+      .modal-form {
+        display: grid;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .profile-id-input {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        overflow: hidden;
+        border-radius: 16px;
+        border: 1px solid rgba(67, 52, 38, 0.14);
+        background: rgba(255, 255, 255, 0.86);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+      }
+      .profile-id-prefix {
+        display: inline-flex;
+        align-items: center;
+        min-height: 54px;
+        padding: 0 14px 0 16px;
+        font-family: var(--mono);
+        font-size: 0.92rem;
+        color: var(--accent);
+        background: rgba(14, 107, 88, 0.08);
+        border-right: 1px solid rgba(67, 52, 38, 0.1);
+      }
+      .profile-id-suffix {
+        min-width: 0;
+        border: 0;
+        border-radius: 0;
+        padding: 16px 16px 16px 14px;
+        background: transparent;
+        font-family: var(--mono);
+        font-size: 0.96rem;
+      }
+      .profile-id-suffix:focus {
+        outline: none;
+        background: rgba(255, 255, 255, 0.96);
+      }
+      .profile-preview {
+        padding: 14px 16px;
+        border-radius: 16px;
+        border: 1px solid rgba(67, 52, 38, 0.08);
+        background: rgba(255, 255, 255, 0.56);
+      }
+      .profile-preview strong {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 0.82rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .profile-preview code {
+        display: block;
+        font-family: var(--mono);
+        font-size: 0.92rem;
+        color: var(--text);
+        word-break: break-all;
+      }
+      .profile-preview-empty { color: rgba(107, 97, 88, 0.72); }
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+      .modal-note {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
       @media (max-width: 860px) {
         .shell { padding: 18px 12px 28px; }
         .hero, .section { padding: 16px; }
+        .modal-card { padding: 20px; border-radius: 22px; }
+        .profile-id-input { grid-template-columns: 1fr; }
+        .profile-id-prefix {
+          min-height: auto;
+          padding: 12px 14px 0;
+          border-right: 0;
+          background: transparent;
+        }
+        .profile-id-suffix { padding-top: 8px; }
+        .modal-actions { flex-direction: column-reverse; }
+        .modal-actions button { width: 100%; }
       }
     </style>
   </head>
@@ -354,6 +490,47 @@ export function renderHtml() {
       </section>
     </div>
 
+    <div id="addModal" class="modal-shell" hidden aria-hidden="true">
+      <div class="modal-backdrop" data-modal-close="true"></div>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="addModalTitle">
+        <div class="modal-top">
+          <div>
+            <div class="eyebrow">New Account</div>
+            <h2 id="addModalTitle" class="modal-title">新增 openai-codex 账号</h2>
+            <p class="modal-copy">前缀固定，用户只需要填写自己的账号后缀。提交后会直接进入 OAuth 登录流程。</p>
+          </div>
+          <button id="addModalCloseButton" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <form id="addModalForm" class="modal-form">
+          <label class="field" for="addProfileSuffixInput">
+            <span class="field-label">账号标识后缀</span>
+            <div class="profile-id-input">
+              <span class="profile-id-prefix">openai-codex:</span>
+              <input
+                id="addProfileSuffixInput"
+                class="input profile-id-suffix"
+                type="text"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="work"
+              />
+            </div>
+            <span class="field-note">例如 <code>work</code>、<code>personal</code>、<code>team-a</code>。最终会保存成完整的 profileId。</span>
+          </label>
+          <div class="profile-preview">
+            <strong>将要创建</strong>
+            <code id="addProfilePreview">openai-codex:<span class="profile-preview-empty">...</span></code>
+          </div>
+          <div id="addModalError" class="error-text" hidden></div>
+          <p class="modal-note">如果这个后缀已存在，会在写入凭证阶段直接报错，不会覆盖已有账号。</p>
+          <div class="modal-actions">
+            <button id="addModalCancelButton" class="button-secondary" type="button">取消</button>
+            <button id="addModalSubmitButton" class="button-primary" type="submit">开始登录</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <script>
       const appState = {
         data: null,
@@ -389,10 +566,19 @@ export function renderHtml() {
       const rows = document.getElementById("rows");
       const emptyState = document.getElementById("emptyState");
       const loginStatus = document.getElementById("loginStatus");
+      const addModal = document.getElementById("addModal");
+      const addModalForm = document.getElementById("addModalForm");
+      const addModalCloseButton = document.getElementById("addModalCloseButton");
+      const addModalCancelButton = document.getElementById("addModalCancelButton");
+      const addProfileSuffixInput = document.getElementById("addProfileSuffixInput");
+      const addProfilePreview = document.getElementById("addProfilePreview");
+      const addModalError = document.getElementById("addModalError");
+      const addModalSubmitButton = document.getElementById("addModalSubmitButton");
       const REFRESH_INTERVAL_STORAGE_KEY = "codex-auth-dashboard.refresh-interval-seconds";
       const AUTO_APPLY_STORAGE_KEY = "codex-auth-dashboard.auto-apply-after-refresh";
       const USAGE_PROXY_ENABLED_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-enabled";
       const USAGE_PROXY_URL_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-url";
+      const PROFILE_ID_PREFIX = "openai-codex:";
 
       function formatTime(ts) {
         if (!ts) return "-";
@@ -548,13 +734,84 @@ export function renderHtml() {
         return query ? "/api/state?" + query : "/api/state";
       }
 
+      function syncControlState() {
+        const loginInProgress = Boolean(appState.loginTaskId);
+        const disabled = appState.busy;
+        refreshButton.disabled = disabled;
+        applyButton.disabled = disabled;
+        syncButton.disabled = disabled;
+        addButton.disabled = disabled || loginInProgress;
+        addProfileSuffixInput.disabled = disabled || loginInProgress;
+        addModalSubmitButton.disabled = disabled || loginInProgress;
+        rows.querySelectorAll("button").forEach((button) => {
+          button.disabled = disabled || loginInProgress;
+        });
+      }
+
       function setBusy(busy, text) {
         appState.busy = busy;
-        refreshButton.disabled = busy;
-        applyButton.disabled = busy;
-        syncButton.disabled = busy;
-        addButton.disabled = busy;
+        syncControlState();
         statusText.textContent = text || "";
+      }
+
+      function normalizeProfileSuffix(value) {
+        let suffix = (value || "").trim();
+        if (suffix.startsWith(PROFILE_ID_PREFIX)) {
+          suffix = suffix.slice(PROFILE_ID_PREFIX.length);
+        }
+        return suffix.replace(/^:+/, "").trim();
+      }
+
+      function buildProfileIdFromSuffix(value) {
+        const suffix = normalizeProfileSuffix(value);
+        return suffix ? PROFILE_ID_PREFIX + suffix : "";
+      }
+
+      function suggestProfileSuffix() {
+        const existing = new Set((appState.data?.rows || []).map((row) => row.profileId));
+        const preferred = ["work", "personal", "backup"];
+        for (const suffix of preferred) {
+          if (!existing.has(PROFILE_ID_PREFIX + suffix)) {
+            return suffix;
+          }
+        }
+        let index = existing.size + 1;
+        while (existing.has(PROFILE_ID_PREFIX + "account-" + index)) {
+          index += 1;
+        }
+        return "account-" + index;
+      }
+
+      function renderAddAccountPreview() {
+        const suffix = normalizeProfileSuffix(addProfileSuffixInput.value);
+        if (!suffix) {
+          addProfilePreview.innerHTML = PROFILE_ID_PREFIX + '<span class="profile-preview-empty">...</span>';
+          return;
+        }
+        addProfilePreview.textContent = PROFILE_ID_PREFIX + suffix;
+      }
+
+      function setAddModalError(message = "") {
+        addModalError.hidden = !message;
+        addModalError.textContent = message;
+      }
+
+      function openAddAccountModal() {
+        addProfileSuffixInput.value = suggestProfileSuffix();
+        setAddModalError("");
+        renderAddAccountPreview();
+        addModal.hidden = false;
+        addModal.setAttribute("aria-hidden", "false");
+        window.requestAnimationFrame(() => {
+          addProfileSuffixInput.focus();
+          addProfileSuffixInput.select();
+        });
+      }
+
+      function closeAddAccountModal() {
+        addModal.hidden = true;
+        addModal.setAttribute("aria-hidden", "true");
+        setAddModalError("");
       }
 
       function renderOrder(target, order) {
@@ -707,6 +964,28 @@ export function renderHtml() {
             }
           });
 
+          const deleteButton = document.createElement("button");
+          deleteButton.type = "button";
+          deleteButton.className = "button-secondary";
+          deleteButton.textContent = "Delete";
+          deleteButton.disabled = appState.busy;
+          deleteButton.addEventListener("click", async () => {
+            const confirmed = window.confirm(
+              "确认删除 " + row.profileId + " 吗？这会同时从 auth-profiles.json 和 openclaw.json 删除对应 auth 信息。",
+            );
+            if (!confirmed) return;
+            setBusy(true, "正在删除账号...");
+            try {
+              const nextState = await postJson("/api/delete-profile", {
+                profileId: row.profileId,
+              });
+              render(nextState);
+              setBusy(false, "账号已删除");
+            } catch (error) {
+              setBusy(false, String(error instanceof Error ? error.message : error));
+            }
+          });
+
           const firstButton = document.createElement("button");
           firstButton.type = "button";
           firstButton.className = "button-secondary";
@@ -728,6 +1007,7 @@ export function renderHtml() {
           });
 
           actionRow.appendChild(renameButton);
+          actionRow.appendChild(deleteButton);
           actionRow.appendChild(firstButton);
           actionRow.appendChild(lastButton);
           actionCell.appendChild(actionRow);
@@ -793,7 +1073,7 @@ export function renderHtml() {
         try {
           const data = await postJson("/api/apply-order", { order });
           render(data);
-          setBusy(false, "顺序已写入 auth-profiles.json");
+          setBusy(false, "顺序已写入，并已触发 gateway 热重载");
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error));
         }
@@ -828,6 +1108,7 @@ export function renderHtml() {
 
       async function pollLogin(taskId) {
         appState.loginTaskId = taskId;
+        syncControlState();
         try {
           while (appState.loginTaskId === taskId) {
             const response = await fetch("/api/login-status?taskId=" + encodeURIComponent(taskId));
@@ -835,6 +1116,7 @@ export function renderHtml() {
             if (!response.ok) {
               renderLoginTask({ profileId: "-", status: "failed", error: task.error || "login status failed" });
               appState.loginTaskId = null;
+              syncControlState();
               return;
             }
             renderLoginTask(task);
@@ -851,6 +1133,11 @@ export function renderHtml() {
             if (task.status === "completed") {
               appState.loginTaskId = null;
               appState.manualPromptShown = false;
+              if (appState.popup && !appState.popup.closed) {
+                appState.popup.close();
+              }
+              appState.popup = null;
+              syncControlState();
               renderLoginTask(task);
               await refreshState("新增账号完成");
               return;
@@ -859,6 +1146,11 @@ export function renderHtml() {
             if (task.status === "failed") {
               appState.loginTaskId = null;
               appState.manualPromptShown = false;
+              if (appState.popup && !appState.popup.closed) {
+                appState.popup.close();
+              }
+              appState.popup = null;
+              syncControlState();
               setBusy(false, task.error || "新增账号失败");
               return;
             }
@@ -868,20 +1160,37 @@ export function renderHtml() {
         } catch (error) {
           appState.loginTaskId = null;
           appState.manualPromptShown = false;
+          syncControlState();
           setBusy(false, String(error instanceof Error ? error.message : error));
         }
       }
 
       async function addAccount() {
-        const profileId = window.prompt("新的 profileId", "openai-codex:work");
-        if (!profileId) return;
+        if (appState.loginTaskId) {
+          setAddModalError("当前已有一个 OAuth 登录流程在进行中，请先完成它。");
+          return;
+        }
 
+        const profileId = buildProfileIdFromSuffix(addProfileSuffixInput.value);
+        if (!profileId) {
+          setAddModalError("请至少填写一个账号后缀。");
+          addProfileSuffixInput.focus();
+          return;
+        }
+
+        closeAddAccountModal();
+
+        if (appState.popup && !appState.popup.closed) {
+          appState.popup.close();
+        }
         appState.popup = window.open("about:blank", "_blank");
         appState.manualPromptShown = false;
         setBusy(true, "正在启动 OAuth 登录...");
 
         try {
           const task = await postJson("/api/login/start", { profileId });
+          appState.loginTaskId = task.taskId;
+          syncControlState();
           renderLoginTask(task);
           maybeNavigatePopup(task.authUrl);
           setBusy(false, "等待完成 OAuth 登录...");
@@ -925,10 +1234,36 @@ export function renderHtml() {
           : "已关闭额度请求代理";
       });
 
+      addProfileSuffixInput.addEventListener("input", () => {
+        renderAddAccountPreview();
+        if (!addModalError.hidden) {
+          setAddModalError("");
+        }
+      });
+
+      addModal.addEventListener("click", (event) => {
+        if (event.target instanceof HTMLElement && event.target.dataset.modalClose === "true") {
+          closeAddAccountModal();
+        }
+      });
+
+      addModalCloseButton.addEventListener("click", closeAddAccountModal);
+      addModalCancelButton.addEventListener("click", closeAddAccountModal);
+      addModalForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        void addAccount();
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !addModal.hidden) {
+          closeAddAccountModal();
+        }
+      });
+
       refreshButton.addEventListener("click", () => refreshState());
       applyButton.addEventListener("click", applyRecommendedOrder);
       syncButton.addEventListener("click", syncConfig);
-      addButton.addEventListener("click", addAccount);
+      addButton.addEventListener("click", openAddAccountModal);
       loadAutomationSettings();
       refreshState();
       setInterval(updateCountdowns, 1000);

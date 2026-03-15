@@ -1,5 +1,5 @@
 import http from "node:http";
-import { LoginManager, applyOrder, loadDashboardState, renameProfile, syncConfig } from "./state.js";
+import { LoginManager, applyOrder, deleteProfile, loadDashboardState, renameProfile, syncConfig } from "./state.js";
 import { renderHtml } from "./ui.js";
 import { createUsageFetch } from "./usage-fetch.js";
 
@@ -49,6 +49,7 @@ function createStateDeps(url, body) {
   const usageProxy = resolveUsageProxyConfig(url, body);
   return {
     fetchImpl: createUsageFetch(usageProxy),
+    proxyConfig: usageProxy,
   };
 }
 
@@ -96,6 +97,17 @@ export async function startDashboardServer(options = {}) {
         return;
       }
 
+      if (request.method === "POST" && url.pathname === "/api/delete-profile") {
+        const body = await readBody(request);
+        const profileId = typeof body.profileId === "string" ? body.profileId.trim() : "";
+        if (!profileId) {
+          sendJson(response, 400, { error: "profileId is required." });
+          return;
+        }
+        sendJson(response, 200, await deleteProfile(options, profileId, createStateDeps(url, body)));
+        return;
+      }
+
       if (request.method === "POST" && url.pathname === "/api/login/start") {
         const body = await readBody(request);
         const profileId = typeof body.profileId === "string" ? body.profileId.trim() : "";
@@ -103,7 +115,10 @@ export async function startDashboardServer(options = {}) {
           sendJson(response, 400, { error: "profileId is required." });
           return;
         }
-        const task = loginManager.start(options, profileId);
+        const task = loginManager.start({
+          ...options,
+          usageProxy: resolveUsageProxyConfig(url, body),
+        }, profileId);
         // Give onAuth a brief chance to populate the URL before responding.
         await new Promise((resolve) => setTimeout(resolve, 150));
         sendJson(response, 200, loginManager.getTask(task.taskId) || task);

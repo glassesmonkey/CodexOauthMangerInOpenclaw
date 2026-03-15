@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import net from "node:net";
 import { CODEX_PROVIDER } from "./constants.js";
 import {
   applyOrderToAuthStore,
   computeEffectiveOrder,
+  deleteProfileFromAuthStore,
   getStoredOrder,
   listCodexProfiles,
   readAuthStore,
@@ -13,16 +15,19 @@ import {
 import { fetchCodexUsage } from "./codex-api.js";
 import { loginWithCodex, resolveCredentialToken } from "./codex-auth.js";
 import {
+  deleteProfileFromConfig,
   getConfigCodexOrder,
   getConfigCodexProfiles,
   readOpenClawConfig,
   renameProfileInConfig,
   syncCodexIntoConfig,
+  touchOpenClawConfig,
   writeOpenClawConfig,
 } from "./config-store.js";
 import { withFileLock } from "./file-lock.js";
 import { recommendProfileOrder, buildConfigAudit, buildWarnings } from "./order.js";
 import { resolvePaths } from "./paths.js";
+import { clearAutoAuthProfileOverrides, readSessionStore, writeSessionStore } from "./session-store.js";
 import { toErrorMessage } from "./utils.js";
 
 function resolveAccountId(credential) {
@@ -47,7 +52,8 @@ function resolveExpiresAt(credential) {
 
 function createNotes() {
   return [
-    "Applying order only updates auth-profiles.json. Existing OpenClaw sessions may keep using their current auth profile until the session is recreated or reselected.",
+    "Applying order updates auth-profiles.json, touches openclaw.json to trigger gateway hot reload, and clears auto-selected Codex session overrides that still point at older profiles.",
+    "Only auto-selected Codex session overrides are cleared. Explicit user-selected session auth profiles are left unchanged.",
     "This tool is standalone. It reads and writes OpenClaw JSON files directly but does not import OpenClaw project code.",
   ];
 }
@@ -75,7 +81,9 @@ export async function loadDashboardState(options = {}, deps = {}) {
     };
 
     try {
-      const resolved = await resolveCredentialToken(entry.credential);
+      const resolved = await resolveCredentialToken(entry.credential, {
+        proxyConfig: deps.proxyConfig,
+      });
       if (resolved.refreshed) {
         refreshedStore.profiles[entry.profileId] = resolved.credential;
         storeChanged = true;
@@ -167,8 +175,34 @@ async function updateOpenClawConfig(options, updater) {
   });
 }
 
+async function updateSessionStore(options, updater) {
+  const context = resolvePaths(options);
+  return await withFileLock(context.sessionStorePath, async () => {
+    const store = readSessionStore(context.sessionStorePath);
+    const next = updater(store, context);
+    writeSessionStore(context.sessionStorePath, next);
+    return next;
+  });
+}
+
 export async function applyOrder(options, order, deps = {}) {
-  await updateAuthStore(options, (store) => applyOrderToAuthStore(store, order));
+  const updatedStore = await updateAuthStore(options, (store) => applyOrderToAuthStore(store, order));
+  const preferredOrder = getStoredOrder(updatedStore);
+  const context = resolvePaths(options);
+
+  if (context.configExists) {
+    await updateOpenClawConfig(options, (config) => touchOpenClawConfig(config));
+  }
+
+  if (context.sessionStoreExists && preferredOrder.length > 0) {
+    await updateSessionStore(options, (store) =>
+      clearAutoAuthProfileOverrides(store, {
+        provider: CODEX_PROVIDER,
+        preferredProfileId: preferredOrder[0],
+      }).store,
+    );
+  }
+
   return await loadDashboardState(options, deps);
 }
 
@@ -190,6 +224,15 @@ export async function renameProfile(options, profileId, nextProfileId, deps = {}
   const context = resolvePaths(options);
   if (context.configExists) {
     await updateOpenClawConfig(options, (config) => renameProfileInConfig(config, profileId, nextProfileId));
+  }
+  return await loadDashboardState(options, deps);
+}
+
+export async function deleteProfile(options, profileId, deps = {}) {
+  await updateAuthStore(options, (store) => deleteProfileFromAuthStore(store, profileId));
+  const context = resolvePaths(options);
+  if (context.configExists) {
+    await updateOpenClawConfig(options, (config) => deleteProfileFromConfig(config, profileId));
   }
   return await loadDashboardState(options, deps);
 }
@@ -231,10 +274,59 @@ function createDeferred() {
   return { promise, resolve, reject };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function canBindLocalPort(port, host = "127.0.0.1") {
+  return await new Promise((resolve) => {
+    const probe = net.createServer();
+    let settled = false;
+
+    const finish = (result) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(result);
+    };
+
+    probe.once("error", () => finish(false));
+    probe.listen(port, host, () => {
+      probe.close(() => finish(true));
+    });
+  });
+}
+
+export async function waitForOpenAICallbackPort(options = {}) {
+  const port = Number.isInteger(options.port) ? options.port : 1455;
+  const host = typeof options.host === "string" && options.host.trim() ? options.host.trim() : "127.0.0.1";
+  const timeoutMs = Number.isInteger(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : 10_000;
+  const pollIntervalMs = Number.isInteger(options.pollIntervalMs) && options.pollIntervalMs > 0
+    ? options.pollIntervalMs
+    : 100;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    if (await canBindLocalPort(port, host)) {
+      return;
+    }
+    await sleep(pollIntervalMs);
+  }
+
+  throw new Error(
+    `OAuth callback port ${host}:${port} is still busy. Wait a moment and try again.`,
+  );
+}
+
 export class LoginManager {
   constructor(options = {}) {
     this.options = options;
     this.tasks = new Map();
+    this.loginRunner = options.loginRunner ?? loginWithCodex;
+    this.saveProfile = options.saveProfile ?? saveLoggedInProfile;
+    this.waitForCallbackPort = options.waitForCallbackPort ?? waitForOpenAICallbackPort;
+    this.loginQueue = Promise.resolve();
   }
 
   prune() {
@@ -302,8 +394,17 @@ export class LoginManager {
   }
 
   async run(task, options) {
+    const previousRun = this.loginQueue;
+    let releaseQueue = () => {};
+    this.loginQueue = new Promise((resolve) => {
+      releaseQueue = resolve;
+    });
+
     try {
-      const credentials = await loginWithCodex({
+      await previousRun;
+      await this.waitForCallbackPort();
+
+      const credentials = await this.loginRunner({
         onAuth: ({ url, instructions }) => {
           task.status = "awaiting_auth";
           task.authUrl = url;
@@ -316,17 +417,20 @@ export class LoginManager {
           task.updatedAt = Date.now();
           return await task.manualCode.promise;
         },
+        proxyConfig: options.usageProxy,
       });
 
       task.status = "saving";
       task.updatedAt = Date.now();
-      await saveLoggedInProfile(options, task.profileId, credentials);
+      await this.saveProfile(options, task.profileId, credentials);
       task.status = "completed";
       task.updatedAt = Date.now();
     } catch (error) {
       task.status = "failed";
       task.error = toErrorMessage(error);
       task.updatedAt = Date.now();
+    } finally {
+      releaseQueue();
     }
   }
 }

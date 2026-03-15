@@ -63,6 +63,8 @@ export function resolvePaths(options = {}) {
     process.env.PI_CODING_AGENT_DIR ||
     path.join(stateDir, "agents", agentId, "agent");
   const authStorePath = path.join(agentDir, "auth-profiles.json");
+  const sessionsDir = path.join(stateDir, "agents", agentId, "sessions");
+  const sessionStorePath = path.join(sessionsDir, "sessions.json");
 
   return {
     stateDir,
@@ -73,6 +75,9 @@ export function resolvePaths(options = {}) {
     agentId,
     agentDir,
     authStorePath,
+    sessionsDir,
+    sessionStorePath,
     authStoreExists: pathExists(authStorePath),
+    sessionStoreExists: pathExists(sessionStorePath),
   };
 }

@@ -1,6 +1,33 @@
 import { loginOpenAICodex, refreshOpenAICodexToken } from "@mariozechner/pi-ai/oauth";
+import { createUsageFetch } from "./usage-fetch.js";
 
-export async function resolveCredentialToken(credential) {
+async function withTemporaryFetch(fetchImpl, action) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  try {
+    return await action();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+function enhanceOAuthError(error, proxyConfig) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message !== "Token exchange failed") {
+    return error instanceof Error ? error : new Error(message);
+  }
+
+  const hint = proxyConfig?.enabled
+    ? " Check the proxy URL and confirm the dashboard process can reach OpenAI's OAuth token endpoint."
+    : " If you're on WSL or a proxied network, restart the dashboard after running proxy setup, or enable the dashboard proxy before adding the account.";
+
+  return new Error(message + hint);
+}
+
+export async function resolveCredentialToken(credential, options = {}) {
+  const refreshImpl = options.refreshImpl ?? refreshOpenAICodexToken;
+  const proxyFetch = createUsageFetch(options.proxyConfig);
+
   if (credential?.type === "oauth") {
     if (typeof credential.access !== "string" || !credential.access.trim()) {
       throw new Error("OAuth profile is missing access token");
@@ -16,7 +43,7 @@ export async function resolveCredentialToken(credential) {
     if (typeof credential.refresh !== "string" || !credential.refresh.trim()) {
       throw new Error("OAuth profile is expired and missing refresh token");
     }
-    const refreshed = await refreshOpenAICodexToken(credential.refresh);
+    const refreshed = await withTemporaryFetch(proxyFetch, async () => await refreshImpl(credential.refresh));
     return {
       token: refreshed.access,
       credential: {
@@ -43,11 +70,19 @@ export async function resolveCredentialToken(credential) {
   throw new Error(`Unsupported credential type: ${credential?.type ?? "unknown"}`);
 }
 
-export async function loginWithCodex({ onAuth, waitForManualCode }) {
-  return await loginOpenAICodex({
-    originator: "codex-auth-dashboard",
-    onAuth,
-    onManualCodeInput: async () => await waitForManualCode("Paste the authorization code or full redirect URL:"),
-    onPrompt: async (prompt) => await waitForManualCode(prompt?.message || "Paste the authorization code or full redirect URL:"),
-  });
+export async function loginWithCodex({ onAuth, waitForManualCode, proxyConfig, loginImpl = loginOpenAICodex }) {
+  const proxyFetch = createUsageFetch(proxyConfig);
+
+  try {
+    return await withTemporaryFetch(proxyFetch, async () =>
+      await loginImpl({
+        originator: "codex-auth-dashboard",
+        onAuth,
+        onManualCodeInput: async () => await waitForManualCode("Paste the authorization code or full redirect URL:"),
+        onPrompt: async (prompt) => await waitForManualCode(prompt?.message || "Paste the authorization code or full redirect URL:"),
+      }),
+    );
+  } catch (error) {
+    throw enhanceOAuthError(error, proxyConfig);
+  }
 }
