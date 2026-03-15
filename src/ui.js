@@ -1,10 +1,62 @@
+function buildSvgDataUri(svg) {
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+const BRAND_SYMBOL_SVG = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <defs>
+    <linearGradient id="cad-bg" x1="16" y1="14" x2="82" y2="84" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E6B58" />
+      <stop offset="1" stop-color="#BB6236" />
+    </linearGradient>
+    <radialGradient id="cad-glow" cx="0" cy="0" r="1" gradientTransform="translate(67 26) rotate(122.905) scale(48.6898)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF4DE" stop-opacity="0.95" />
+      <stop offset="1" stop-color="#FFF4DE" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+  <rect x="8" y="8" width="80" height="80" rx="24" fill="url(#cad-bg)" />
+  <rect x="8" y="8" width="80" height="80" rx="24" fill="url(#cad-glow)" />
+  <path d="M40 27C29.507 27 21 36.178 21 48C21 59.822 29.507 69 40 69C45.545 69 50.536 66.438 54.01 62.356" stroke="#FFF8EF" stroke-width="9" stroke-linecap="round" />
+  <path d="M56.5 66L66.132 31.855C66.709 29.812 69.59 29.812 70.168 31.855L79.8 66" stroke="#FFF8EF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M61.5 52H74.8" stroke="#FFF8EF" stroke-width="8" stroke-linecap="round" />
+  <circle cx="69.4" cy="25.2" r="5.4" fill="#FFD79B" />
+  <path d="M69.4 18.8V31.6M62.999 25.2H75.8" stroke="#FFF8EF" stroke-width="2.8" stroke-linecap="round" opacity="0.9" />
+</svg>
+`.trim();
+
+const HEADER_LOGO_SVG = `
+<svg class="brand-symbol-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="cad-header-bg" x1="16" y1="14" x2="82" y2="84" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E6B58" />
+      <stop offset="1" stop-color="#BB6236" />
+    </linearGradient>
+    <radialGradient id="cad-header-glow" cx="0" cy="0" r="1" gradientTransform="translate(67 26) rotate(122.905) scale(48.6898)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF4DE" stop-opacity="0.95" />
+      <stop offset="1" stop-color="#FFF4DE" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+  <rect x="8" y="8" width="80" height="80" rx="24" fill="url(#cad-header-bg)" />
+  <rect x="8" y="8" width="80" height="80" rx="24" fill="url(#cad-header-glow)" />
+  <path d="M40 27C29.507 27 21 36.178 21 48C21 59.822 29.507 69 40 69C45.545 69 50.536 66.438 54.01 62.356" stroke="#FFF8EF" stroke-width="9" stroke-linecap="round" />
+  <path d="M56.5 66L66.132 31.855C66.709 29.812 69.59 29.812 70.168 31.855L79.8 66" stroke="#FFF8EF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M61.5 52H74.8" stroke="#FFF8EF" stroke-width="8" stroke-linecap="round" />
+  <circle cx="69.4" cy="25.2" r="5.4" fill="#FFD79B" />
+  <path d="M69.4 18.8V31.6M62.999 25.2H75.8" stroke="#FFF8EF" stroke-width="2.8" stroke-linecap="round" opacity="0.9" />
+</svg>
+`.trim();
+
+const FAVICON_DATA_URI = buildSvgDataUri(BRAND_SYMBOL_SVG);
+
 export function renderHtml() {
   return String.raw`<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0e6b58" />
     <title>Codex Auth Dashboard</title>
+    <link rel="icon" href="${FAVICON_DATA_URI}" type="image/svg+xml" />
     <style>
       :root {
         color-scheme: light;
@@ -25,6 +77,7 @@ export function renderHtml() {
       }
 
       * { box-sizing: border-box; }
+      html { background: #f3efe7; }
       body {
         margin: 0;
         min-height: 100vh;
@@ -43,7 +96,47 @@ export function renderHtml() {
         box-shadow: var(--shadow);
         backdrop-filter: blur(16px);
       }
+      .hero {
+        position: relative;
+        overflow: hidden;
+      }
+      .hero::after {
+        content: "";
+        position: absolute;
+        top: -80px;
+        right: -40px;
+        width: 260px;
+        height: 260px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(187, 98, 54, 0.2), rgba(187, 98, 54, 0));
+        pointer-events: none;
+      }
       .hero, .section { padding: 20px; margin-bottom: 16px; }
+      .hero-head {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+      .brand-mark {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        width: 96px;
+        height: 96px;
+        padding: 6px;
+        border-radius: 28px;
+        background: rgba(255, 252, 247, 0.88);
+        border: 1px solid rgba(67, 52, 38, 0.1);
+        box-shadow: 0 18px 40px rgba(84, 60, 36, 0.14);
+      }
+      .brand-symbol-svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .brand-copy { min-width: 0; }
       .eyebrow {
         margin: 0 0 8px;
         font-size: 0.78rem;
@@ -60,13 +153,33 @@ export function renderHtml() {
         margin: 10px 0 0;
         color: var(--muted);
       }
+      .brand-tagline {
+        margin: 12px 0 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(67, 52, 38, 0.08);
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+      .brand-tagline strong {
+        color: var(--text);
+        letter-spacing: 0.02em;
+      }
       .controls {
+        position: relative;
+        z-index: 1;
         display: flex;
         flex-wrap: wrap;
         gap: 10px;
         margin-top: 18px;
       }
       .automation-panel {
+        position: relative;
+        z-index: 1;
         margin-top: 18px;
         padding: 14px 16px;
         border: 1px solid rgba(67, 52, 38, 0.1);
@@ -130,6 +243,8 @@ export function renderHtml() {
       .button-primary { background: linear-gradient(135deg, var(--accent), #1b8a6f); color: #fff; }
       .button-secondary { background: rgba(255,255,255,0.9); border: 1px solid var(--line); color: var(--text); }
       .meta-grid {
+        position: relative;
+        z-index: 1;
         display: grid;
         gap: 12px;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -389,6 +504,15 @@ export function renderHtml() {
       @media (max-width: 860px) {
         .shell { padding: 18px 12px 28px; }
         .hero, .section { padding: 16px; }
+        .hero-head {
+          align-items: flex-start;
+          gap: 14px;
+        }
+        .brand-mark {
+          width: 78px;
+          height: 78px;
+          border-radius: 24px;
+        }
         .modal-card { padding: 20px; border-radius: 22px; }
         .profile-id-input { grid-template-columns: 1fr; }
         .profile-id-prefix {
@@ -401,14 +525,28 @@ export function renderHtml() {
         .modal-actions { flex-direction: column-reverse; }
         .modal-actions button { width: 100%; }
       }
+      @media (max-width: 560px) {
+        .hero-head { flex-direction: column; }
+        .brand-tagline {
+          width: 100%;
+          justify-content: center;
+          text-align: center;
+        }
+      }
     </style>
   </head>
   <body>
     <div class="shell">
       <section class="card hero">
-        <p class="eyebrow">Standalone / Codex</p>
-        <h1>Codex Auth Dashboard</h1>
-        <p class="sub">不依赖 OpenClaw 源码，只读取它的 JSON 文件。看用量、加账号、改顺序、补配置都在这里完成。</p>
+        <div class="hero-head">
+          <div class="brand-mark">${HEADER_LOGO_SVG}</div>
+          <div class="brand-copy">
+            <p class="eyebrow">Standalone / Codex</p>
+            <h1>Codex Auth Dashboard</h1>
+            <p class="sub">不依赖 OpenClaw 源码，只读取它的 JSON 文件。看用量、加账号、改顺序、补配置都在这里完成。</p>
+            <div class="brand-tagline"><strong>CA</strong><span>统一用于浏览器标签页和站点头部的主徽记</span></div>
+          </div>
+        </div>
         <div class="controls">
           <button id="refreshButton" class="button-secondary" type="button">刷新</button>
           <button id="applyButton" class="button-primary" type="button">应用推荐顺序</button>
