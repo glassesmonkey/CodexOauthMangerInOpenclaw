@@ -60,71 +60,47 @@ export function renderHtml() {
     <style>
       :root {
         color-scheme: light;
-        --bg: #f6f0e6;
-        --bg-deep: #ede1d0;
-        --surface: rgba(255, 251, 245, 0.88);
-        --surface-strong: rgba(255, 252, 248, 0.96);
-        --surface-muted: rgba(255, 247, 239, 0.76);
-        --line: rgba(67, 52, 38, 0.12);
-        --line-strong: rgba(67, 52, 38, 0.2);
-        --text: #241d18;
-        --muted: #6d6259;
-        --accent: #0f6d59;
-        --accent-strong: #133f37;
-        --accent-2: #b9643a;
-        --accent-2-soft: rgba(185, 100, 58, 0.12);
-        --ok: #1d6b4a;
-        --warn: #9b6216;
-        --danger: #a13633;
-        --info: #385f8d;
-        --shadow-soft: 0 22px 60px rgba(66, 46, 27, 0.12);
-        --shadow-card: 0 24px 80px rgba(49, 36, 23, 0.12);
-        --radius-xl: 28px;
-        --radius-lg: 22px;
-        --radius-md: 16px;
+        --bg: #f5f5f7;
+        --bg-deep: #ececf0;
+        --surface: rgba(255, 255, 255, 0.82);
+        --surface-strong: rgba(255, 255, 255, 0.92);
+        --surface-muted: rgba(248, 248, 250, 0.94);
+        --line: rgba(29, 29, 31, 0.08);
+        --line-strong: rgba(29, 29, 31, 0.16);
+        --text: #1d1d1f;
+        --muted: #6e6e73;
+        --accent: #0071e3;
+        --accent-strong: #0055cc;
+        --accent-2: #8e8e93;
+        --accent-2-soft: rgba(110, 110, 115, 0.08);
+        --ok: #34a853;
+        --warn: #ff9f0a;
+        --danger: #ff453a;
+        --info: #5ac8fa;
+        --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.04);
+        --shadow-card: 0 10px 32px rgba(0, 0, 0, 0.05);
+        --radius-xl: 30px;
+        --radius-lg: 24px;
+        --radius-md: 18px;
         --radius-sm: 12px;
-        --mono: "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
-        --display: "Palatino Linotype", "Book Antiqua", "Source Han Serif SC", "Noto Serif SC", serif;
-        --sans: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        --mono: "SF Mono", "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
+        --display: "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        --sans: "SF Pro Text", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
       }
 
       * { box-sizing: border-box; }
 
-      html {
-        background:
-          radial-gradient(circle at top left, rgba(15, 109, 89, 0.16), transparent 34%),
-          radial-gradient(circle at top right, rgba(185, 100, 58, 0.18), transparent 28%),
-          linear-gradient(180deg, #fbf7f0 0%, var(--bg) 48%, var(--bg-deep) 100%);
-      }
+      html { background: linear-gradient(180deg, #fafafc 0%, var(--bg) 100%); }
 
       body {
         margin: 0;
         min-height: 100vh;
         color: var(--text);
         font-family: var(--sans);
-        background:
-          radial-gradient(circle at 15% 20%, rgba(255, 220, 183, 0.3), transparent 24%),
-          radial-gradient(circle at 85% 18%, rgba(76, 130, 111, 0.22), transparent 22%),
-          linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0));
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0));
       }
 
-      body::before {
-        content: "";
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        background:
-          linear-gradient(120deg, rgba(255, 255, 255, 0.14), transparent 26%),
-          repeating-linear-gradient(
-            90deg,
-            rgba(67, 52, 38, 0.022) 0,
-            rgba(67, 52, 38, 0.022) 1px,
-            transparent 1px,
-            transparent 72px
-          );
-        mix-blend-mode: multiply;
-        opacity: 0.7;
-      }
+      body::before { content: none; }
 
       button,
       input {
@@ -150,9 +126,9 @@ export function renderHtml() {
       .shell {
         position: relative;
         z-index: 1;
-        max-width: 1480px;
+        max-width: 1320px;
         margin: 0 auto;
-        padding: 28px 18px 44px;
+        padding: 28px 20px 48px;
       }
 
       .card {
@@ -162,27 +138,21 @@ export function renderHtml() {
         border: 1px solid var(--line);
         border-radius: var(--radius-xl);
         box-shadow: var(--shadow-card);
-        backdrop-filter: blur(16px);
+        backdrop-filter: blur(18px);
       }
 
-      .card::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent 28%);
-      }
+      .card::after { content: none; }
 
       .section-kicker {
-        margin: 0 0 10px;
-        font-size: 0.74rem;
-        letter-spacing: 0.18em;
+        margin: 0 0 8px;
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: var(--accent-2);
+        color: var(--muted);
       }
 
       .masthead {
-        padding: 26px;
+        padding: 28px;
         animation: rise 420ms ease;
       }
 
@@ -197,7 +167,7 @@ export function renderHtml() {
 
       .brand-panel {
         display: grid;
-        gap: 18px;
+        gap: 16px;
         grid-template-columns: auto minmax(0, 1fr);
         align-items: start;
       }
@@ -205,14 +175,13 @@ export function renderHtml() {
       .brand-mark {
         display: grid;
         place-items: center;
-        width: 104px;
-        height: 104px;
-        padding: 7px;
-        border-radius: 30px;
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 248, 240, 0.72));
-        border: 1px solid rgba(67, 52, 38, 0.08);
-        box-shadow: 0 18px 44px rgba(84, 60, 36, 0.16);
+        width: 72px;
+        height: 72px;
+        padding: 8px;
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
       }
 
       .brand-symbol-svg {
@@ -222,11 +191,11 @@ export function renderHtml() {
       }
 
       .eyebrow {
-        margin: 0 0 10px;
-        font-size: 0.82rem;
-        letter-spacing: 0.12em;
+        margin: 0 0 6px;
+        font-size: 0.78rem;
+        letter-spacing: 0.06em;
         text-transform: uppercase;
-        color: var(--accent-2);
+        color: var(--muted);
       }
 
       h1,
@@ -239,8 +208,9 @@ export function renderHtml() {
       }
 
       h1 {
-        font-size: clamp(2.4rem, 4.8vw, 4.2rem);
-        line-height: 0.98;
+        font-size: clamp(2rem, 4vw, 3.25rem);
+        line-height: 1;
+        font-weight: 700;
       }
 
       h2 {
@@ -249,24 +219,24 @@ export function renderHtml() {
       }
 
       .lede {
-        max-width: 760px;
-        margin: 12px 0 0;
+        max-width: 560px;
+        margin: 10px 0 0;
         color: var(--muted);
-        font-size: 1rem;
-        line-height: 1.7;
+        font-size: 0.98rem;
+        line-height: 1.55;
       }
 
       .hero-note {
         display: inline-flex;
         align-items: center;
-        gap: 10px;
-        margin-top: 14px;
-        padding: 10px 14px;
+        gap: 8px;
+        margin-top: 16px;
+        padding: 8px 12px;
         border-radius: 999px;
-        border: 1px solid rgba(67, 52, 38, 0.08);
-        background: rgba(255, 255, 255, 0.74);
+        border: 1px solid rgba(29, 29, 31, 0.08);
+        background: rgba(255, 255, 255, 0.7);
         color: var(--muted);
-        font-size: 0.84rem;
+        font-size: 0.8rem;
       }
 
       .hero-note strong {
@@ -276,7 +246,7 @@ export function renderHtml() {
       .masthead-actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 8px;
         justify-content: flex-end;
         align-content: start;
       }
@@ -285,10 +255,10 @@ export function renderHtml() {
       .button-secondary,
       .button-ghost,
       .button-danger {
-        min-height: 44px;
-        padding: 11px 16px;
+        min-height: 40px;
+        padding: 10px 14px;
         border-radius: 999px;
-        transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease, background 140ms ease;
+        transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease, background 140ms ease, border-color 140ms ease;
       }
 
       .button-primary:hover:not(:disabled),
@@ -308,51 +278,49 @@ export function renderHtml() {
 
       .button-primary {
         color: #fff;
-        background: linear-gradient(135deg, var(--accent-strong), var(--accent));
-        box-shadow: 0 12px 28px rgba(15, 109, 89, 0.24);
+        background: linear-gradient(180deg, #1b1b1d, #0f0f10);
+        box-shadow: none;
       }
 
       .button-secondary {
         color: var(--text);
-        background: rgba(255, 255, 255, 0.84);
+        background: rgba(255, 255, 255, 0.68);
         border: 1px solid var(--line);
       }
 
       .button-ghost {
-        color: var(--accent-strong);
-        background: rgba(15, 109, 89, 0.08);
-        border: 1px solid rgba(15, 109, 89, 0.12);
+        color: var(--text);
+        background: rgba(242, 242, 247, 0.92);
+        border: 1px solid rgba(29, 29, 31, 0.06);
       }
 
       .button-danger {
         color: #fff;
-        background: linear-gradient(135deg, #842622, var(--danger));
-        box-shadow: 0 12px 24px rgba(161, 54, 51, 0.22);
+        background: linear-gradient(180deg, #ff6a61, var(--danger));
+        box-shadow: none;
       }
 
       .summary-grid {
         position: relative;
         z-index: 1;
         display: grid;
-        gap: 14px;
-        grid-template-columns: minmax(0, 1.25fr) minmax(240px, 0.7fr) minmax(260px, 0.85fr);
+        gap: 16px;
+        grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.82fr);
         margin-top: 24px;
       }
 
       .summary-card,
       .spotlight-card {
         position: relative;
-        padding: 18px;
+        padding: 22px;
         border-radius: var(--radius-lg);
-        border: 1px solid rgba(67, 52, 38, 0.08);
+        border: 1px solid rgba(29, 29, 31, 0.06);
         background: var(--surface-strong);
         box-shadow: var(--shadow-soft);
       }
 
       .spotlight-card {
-        background:
-          radial-gradient(circle at top right, rgba(255, 214, 170, 0.3), transparent 34%),
-          linear-gradient(180deg, rgba(255, 253, 249, 0.98), rgba(255, 247, 238, 0.92));
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 250, 252, 0.94));
       }
 
       .spotlight-head {
@@ -366,61 +334,119 @@ export function renderHtml() {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-width: 48px;
-        min-height: 48px;
-        padding: 0 14px;
+        min-width: 42px;
+        min-height: 42px;
+        padding: 0 12px;
         border-radius: 999px;
-        background: rgba(15, 109, 89, 0.1);
-        border: 1px solid rgba(15, 109, 89, 0.12);
-        color: var(--accent-strong);
+        background: rgba(242, 242, 247, 0.96);
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        color: var(--muted);
         font-family: var(--mono);
-        font-size: 0.86rem;
+        font-size: 0.8rem;
       }
 
       .spotlight-name {
-        margin-top: 6px;
-        font-size: clamp(1.5rem, 3vw, 2.3rem);
-        line-height: 1.04;
+        margin-top: 4px;
+        font-size: clamp(1.4rem, 2.6vw, 2rem);
+        line-height: 1.08;
       }
 
       .spotlight-id {
-        margin-top: 8px;
+        margin-top: 6px;
         font-family: var(--mono);
-        font-size: 0.86rem;
+        font-size: 0.78rem;
         color: var(--muted);
         word-break: break-all;
       }
 
       .spotlight-reason {
-        margin: 14px 0 0;
-        font-size: 0.95rem;
-        line-height: 1.6;
-        color: var(--text);
+        margin: 10px 0 0;
+        font-size: 0.88rem;
+        line-height: 1.45;
+        color: var(--muted);
       }
 
       .tag-row,
       .order-pill-row {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
+        gap: 6px;
       }
 
       .tag-row {
-        margin-top: 14px;
+        margin-top: 12px;
+      }
+
+      .spotlight-grid {
+        display: grid;
+        gap: 20px;
+        grid-template-columns: minmax(0, 1fr) 128px;
+        align-items: center;
+      }
+
+      .spotlight-visual {
+        display: grid;
+        gap: 10px;
+        justify-items: center;
+      }
+
+      .quota-ring {
+        --ring-progress: 0;
+        --ring-color: var(--accent);
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        background:
+          radial-gradient(circle at center, rgba(255, 255, 255, 0.98) 0 56%, transparent 57%),
+          conic-gradient(var(--ring-color) calc(var(--ring-progress) * 1%), rgba(29, 29, 31, 0.08) 0);
+        display: grid;
+        place-items: center;
+      }
+
+      .quota-ring-core {
+        display: grid;
+        gap: 2px;
+        place-items: center;
+        text-align: center;
+      }
+
+      .quota-ring-value {
+        font-size: 1.55rem;
+        font-weight: 600;
+        line-height: 1;
+      }
+
+      .quota-ring-label {
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .spotlight-capsule {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 28px;
+        padding: 0 12px;
+        border-radius: 999px;
+        background: rgba(242, 242, 247, 0.96);
+        color: var(--muted);
+        font-size: 0.78rem;
       }
 
       .meta-tag,
       .order-pill {
         display: inline-flex;
         align-items: center;
-        gap: 8px;
-        min-height: 30px;
-        padding: 6px 11px;
+        gap: 6px;
+        min-height: 28px;
+        padding: 5px 10px;
         border-radius: 999px;
-        border: 1px solid rgba(67, 52, 38, 0.1);
-        background: rgba(255, 255, 255, 0.78);
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        background: rgba(242, 242, 247, 0.92);
         color: var(--text);
-        font-size: 0.82rem;
+        font-size: 0.76rem;
       }
 
       .meta-tag.ok,
@@ -458,20 +484,20 @@ export function renderHtml() {
       .spotlight-actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
-        margin-top: 18px;
+        gap: 8px;
+        margin-top: 16px;
       }
 
       .summary-card h3 {
-        font-size: 1.1rem;
-        line-height: 1.2;
+        font-size: 1rem;
+        line-height: 1.18;
       }
 
       .summary-copy {
-        margin: 10px 0 0;
+        margin: 8px 0 0;
         color: var(--muted);
-        font-size: 0.9rem;
-        line-height: 1.6;
+        font-size: 0.82rem;
+        line-height: 1.45;
       }
 
       .stat-grid {
@@ -480,36 +506,87 @@ export function renderHtml() {
         margin-top: 14px;
       }
 
+      .stat-grid.compact {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
       .stat-box {
         display: grid;
-        gap: 4px;
-        padding: 12px 14px;
+        gap: 2px;
+        padding: 14px 14px 13px;
         border-radius: var(--radius-md);
-        border: 1px solid rgba(67, 52, 38, 0.08);
-        background: rgba(255, 255, 255, 0.74);
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        background: rgba(255, 255, 255, 0.82);
       }
 
       .stat-label {
         font-size: 0.74rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
+        letter-spacing: 0.02em;
         color: var(--muted);
       }
 
       .stat-value {
         font-family: var(--display);
-        font-size: 1.22rem;
+        font-size: 1.12rem;
         line-height: 1.1;
+      }
+
+      .stat-box.emphasis {
+        padding: 14px 15px;
+        gap: 6px;
+      }
+
+      .stat-box.emphasis .stat-value {
+        font-size: clamp(1.45rem, 2.6vw, 2rem);
+      }
+
+      .stat-box.available {
+        background: linear-gradient(180deg, rgba(245, 251, 247, 0.98), rgba(239, 249, 243, 0.92));
+        border-color: rgba(52, 168, 83, 0.12);
+      }
+
+      .stat-box.depleted {
+        background: linear-gradient(180deg, rgba(255, 249, 240, 0.98), rgba(255, 244, 234, 0.92));
+        border-color: rgba(255, 159, 10, 0.14);
+      }
+
+      .stat-box.total {
+        background: linear-gradient(180deg, rgba(250, 250, 252, 0.98), rgba(245, 245, 247, 0.92));
+      }
+
+      .summary-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .summary-meta-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 30px;
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        background: rgba(242, 242, 247, 0.9);
+      }
+
+      .summary-meta-value {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        line-height: 1;
+        color: var(--text);
       }
 
       .snapshot-grid {
         display: grid;
-        gap: 12px;
-        margin-top: 14px;
+        gap: 10px;
+        margin-top: 12px;
       }
 
       .snapshot-item {
-        padding-bottom: 12px;
+        padding-bottom: 10px;
         border-bottom: 1px solid rgba(67, 52, 38, 0.08);
       }
 
@@ -532,13 +609,13 @@ export function renderHtml() {
 
       .flash-banner {
         margin-top: 16px;
-        padding: 14px 16px;
+        padding: 12px 14px;
         border-radius: var(--radius-md);
-        border: 1px solid rgba(67, 52, 38, 0.08);
+        border: 1px solid rgba(29, 29, 31, 0.06);
         background: rgba(255, 255, 255, 0.82);
         box-shadow: var(--shadow-soft);
-        font-size: 0.94rem;
-        line-height: 1.5;
+        font-size: 0.86rem;
+        line-height: 1.4;
         animation: rise 220ms ease;
       }
 
@@ -570,20 +647,40 @@ export function renderHtml() {
         background: rgba(255, 245, 244, 0.9);
       }
 
+      .overview-rail {
+        margin-top: 14px;
+      }
+
       .alert-grid {
-        display: grid;
-        gap: 14px;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-        margin-top: 16px;
+        display: flex;
+        gap: 8px;
+        padding: 0;
+        overflow-x: auto;
+        scroll-snap-type: x proximity;
+      }
+
+      .alert-grid::-webkit-scrollbar {
+        height: 8px;
+      }
+
+      .alert-grid::-webkit-scrollbar-thumb {
+        background: rgba(67, 52, 38, 0.18);
+        border-radius: 999px;
       }
 
       .alert-card {
-        padding: 16px 18px;
-        border-radius: var(--radius-lg);
-        border: 1px solid rgba(67, 52, 38, 0.08);
-        background: var(--surface-strong);
-        box-shadow: var(--shadow-soft);
-        animation: rise 320ms ease;
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 38px;
+        padding: 0 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: none;
+        animation: rise 240ms ease;
+        scroll-snap-align: start;
       }
 
       .alert-card.warn {
@@ -602,115 +699,258 @@ export function renderHtml() {
         background: linear-gradient(180deg, rgba(255, 248, 247, 0.98), rgba(255, 242, 241, 0.92));
       }
 
-      .alert-title {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 10px;
-      }
+      .alert-title { display: contents; }
 
       .alert-icon {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 28px;
-        height: 28px;
+        width: 8px;
+        height: 8px;
         border-radius: 50%;
-        background: rgba(255, 255, 255, 0.74);
-        border: 1px solid rgba(67, 52, 38, 0.08);
-        font-size: 0.74rem;
-        font-weight: 700;
+        background: currentColor;
+        border: 0;
+        font-size: 0;
       }
 
       .alert-title h3 {
-        font-size: 1rem;
+        font-size: 0.82rem;
+        font-weight: 600;
       }
 
       .alert-list {
-        display: grid;
-        gap: 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-height: none;
+        overflow: visible;
       }
 
       .alert-item {
-        padding-left: 14px;
-        position: relative;
-        color: var(--text);
-        font-size: 0.9rem;
-        line-height: 1.55;
+        padding-left: 0;
+        position: static;
+        color: var(--muted);
+        font-size: 0.8rem;
+        line-height: 1;
+        white-space: nowrap;
       }
 
-      .alert-item::before {
-        content: "";
-        position: absolute;
-        top: 0.65em;
-        left: 0;
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: currentColor;
-        opacity: 0.5;
-      }
-
-      .dashboard-grid {
+      .workspace {
         display: grid;
-        gap: 18px;
-        grid-template-columns: minmax(0, 1.6fr) 360px;
+        gap: 16px;
         margin-top: 18px;
       }
 
-      .content-stack,
-      .sidebar-stack {
+      .tabbar-card {
+        padding: 6px;
+        border-radius: 999px;
+        background: rgba(242, 242, 247, 0.92);
+      }
+
+      .tabbar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        overflow-x: auto;
+      }
+
+      .tab-button {
+        flex: 0 0 auto;
+        min-height: 36px;
+        padding: 8px 16px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        transition: transform 140ms ease, background 140ms ease, color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+      }
+
+      .tab-button:hover:not([aria-selected="true"]) {
+        transform: translateY(-1px);
+        color: var(--text);
+      }
+
+      .tab-button[aria-selected="true"] {
+        color: var(--text);
+        border-color: rgba(29, 29, 31, 0.04);
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+      }
+
+      .tab-button-label {
+        display: block;
+        font-weight: 600;
+      }
+
+      .tab-button-copy { display: none; }
+
+      .tab-panels {
         display: grid;
         gap: 18px;
-        align-content: start;
+      }
+
+      .tab-panel[hidden] {
+        display: none !important;
+      }
+
+      .settings-layout {
+        display: grid;
+        gap: 18px;
+        grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
       }
 
       .panel {
-        padding: 22px;
+        padding: 24px;
         animation: rise 460ms ease;
       }
 
       .panel-head {
         display: flex;
-        gap: 16px;
+        gap: 12px;
         justify-content: space-between;
         align-items: start;
-        margin-bottom: 18px;
+        margin-bottom: 14px;
       }
 
       .panel-copy {
-        max-width: 720px;
-        margin: 10px 0 0;
+        max-width: 560px;
+        margin: 6px 0 0;
         color: var(--muted);
-        font-size: 0.94rem;
-        line-height: 1.6;
+        font-size: 0.82rem;
+        line-height: 1.45;
       }
 
       .order-grid {
         display: grid;
-        gap: 12px;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
       .order-card {
-        padding: 16px;
+        padding: 18px;
         border-radius: var(--radius-lg);
-        border: 1px solid rgba(67, 52, 38, 0.08);
+        border: 1px solid rgba(29, 29, 31, 0.06);
         background: var(--surface-muted);
       }
 
       .order-card h3 {
-        font-size: 1rem;
-        margin-bottom: 10px;
+        font-size: 0.96rem;
+        margin-bottom: 0;
       }
 
-      .order-card .panel-copy {
-        margin-top: 6px;
-        font-size: 0.86rem;
+      .order-card .panel-copy { display: none; }
+
+      .order-list {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
       }
 
-      .order-pill-row {
-        min-height: 36px;
+      .order-entry {
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+        border-radius: var(--radius-md);
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        background: rgba(255, 255, 255, 0.86);
+      }
+
+      .order-entry-head {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .order-entry-rank {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 999px;
+        background: rgba(242, 242, 247, 0.96);
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 0.76rem;
+      }
+
+      .order-entry-name {
+        min-width: 0;
+      }
+
+      .order-entry-name strong {
+        display: block;
+        font-size: 0.9rem;
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .order-entry-name span {
+        display: block;
+        margin-top: 2px;
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        line-height: 1.3;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .order-entry-meta {
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        color: var(--muted);
+      }
+
+      .micro-meter {
+        height: 6px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(29, 29, 31, 0.08);
+      }
+
+      .micro-meter-fill {
+        height: 100%;
+        border-radius: inherit;
+      }
+
+      .micro-meter.high .micro-meter-fill {
+        background: linear-gradient(90deg, #1f7a57, #43b581);
+      }
+
+      .micro-meter.medium .micro-meter-fill {
+        background: linear-gradient(90deg, #b97728, #e3aa58);
+      }
+
+      .micro-meter.low .micro-meter-fill {
+        background: linear-gradient(90deg, #a94739, #d96a5b);
+      }
+
+      .micro-meter.unknown {
+        background:
+          repeating-linear-gradient(
+            135deg,
+            rgba(67, 52, 38, 0.08),
+            rgba(67, 52, 38, 0.08) 6px,
+            rgba(255, 255, 255, 0.36) 6px,
+            rgba(255, 255, 255, 0.36) 12px
+          );
+      }
+
+      .order-entry-foot {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .order-entry-foot span {
+        font-size: 0.72rem;
+        color: var(--muted);
       }
 
       .order-pill.is-primary {
@@ -722,7 +962,7 @@ export function renderHtml() {
       .settings-section + .settings-section {
         margin-top: 18px;
         padding-top: 18px;
-        border-top: 1px solid rgba(67, 52, 38, 0.08);
+        border-top: 1px solid rgba(29, 29, 31, 0.06);
       }
 
       .field {
@@ -735,23 +975,23 @@ export function renderHtml() {
       }
 
       .field-label {
-        font-size: 0.82rem;
+        font-size: 0.8rem;
         color: var(--muted);
       }
 
       .field-note {
         color: var(--muted);
-        font-size: 0.78rem;
-        line-height: 1.55;
+        font-size: 0.74rem;
+        line-height: 1.4;
       }
 
       .input {
         width: 100%;
-        min-height: 46px;
-        padding: 12px 14px;
+        min-height: 44px;
+        padding: 11px 14px;
         border-radius: 14px;
-        border: 1px solid rgba(67, 52, 38, 0.14);
-        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(29, 29, 31, 0.08);
+        background: rgba(255, 255, 255, 0.96);
         color: var(--text);
       }
 
@@ -777,104 +1017,119 @@ export function renderHtml() {
 
       .profile-list {
         display: grid;
-        gap: 14px;
+        gap: 16px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
       .profile-card {
         display: grid;
-        gap: 18px;
-        grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(250px, 0.82fr);
-        padding: 18px;
+        gap: 12px;
+        padding: 18px 18px 16px;
         border-radius: var(--radius-lg);
-        border: 1px solid rgba(67, 52, 38, 0.08);
-        background: linear-gradient(180deg, rgba(255, 252, 247, 0.96), rgba(255, 247, 239, 0.9));
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 248, 250, 0.94));
       }
 
       .profile-card.top {
-        border-color: rgba(15, 109, 89, 0.16);
-        box-shadow: 0 20px 48px rgba(15, 109, 89, 0.12);
+        border-color: rgba(0, 113, 227, 0.12);
+        box-shadow: 0 10px 30px rgba(0, 113, 227, 0.08);
       }
 
       .profile-card.problem {
         border-color: rgba(161, 54, 51, 0.16);
       }
 
-      .profile-main {
-        min-width: 0;
-      }
-
       .profile-head {
         display: flex;
         gap: 12px;
         align-items: start;
+        justify-content: space-between;
+      }
+
+      .profile-main {
+        min-width: 0;
       }
 
       .rank-badge {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-width: 42px;
-        min-height: 42px;
+        min-width: 36px;
+        min-height: 36px;
         padding: 0 12px;
         border-radius: 999px;
-        background: rgba(15, 109, 89, 0.1);
-        border: 1px solid rgba(15, 109, 89, 0.12);
-        color: var(--accent-strong);
+        background: rgba(242, 242, 247, 0.96);
+        border: 1px solid rgba(29, 29, 31, 0.05);
+        color: var(--muted);
         font-family: var(--mono);
-        font-size: 0.82rem;
+        font-size: 0.76rem;
       }
 
       .profile-name {
         font-family: var(--display);
-        font-size: 1.22rem;
-        line-height: 1.15;
+        font-size: 1.08rem;
+        line-height: 1.12;
+        font-weight: 600;
       }
 
       .profile-id {
-        margin-top: 8px;
+        margin-top: 4px;
         color: var(--muted);
         font-family: var(--mono);
-        font-size: 0.83rem;
-        line-height: 1.55;
+        font-size: 0.72rem;
+        line-height: 1.35;
         word-break: break-all;
       }
 
       .status-badge-row {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 14px;
+        gap: 6px;
+        margin-top: 4px;
       }
 
       .status-badge {
         display: inline-flex;
         align-items: center;
-        min-height: 30px;
-        padding: 6px 10px;
+        min-height: 26px;
+        padding: 4px 9px;
         border-radius: 999px;
-        border: 1px solid rgba(67, 52, 38, 0.1);
-        background: rgba(255, 255, 255, 0.72);
-        font-size: 0.8rem;
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        background: rgba(242, 242, 247, 0.92);
+        font-size: 0.74rem;
         color: var(--text);
       }
 
       .metrics-column {
         display: grid;
         gap: 12px;
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
       }
 
       .metric-card {
-        padding: 14px;
+        padding: 14px 14px 12px;
         border-radius: var(--radius-md);
-        border: 1px solid rgba(67, 52, 38, 0.08);
-        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        background: rgba(255, 255, 255, 0.88);
+      }
+
+      .metric-card.primary-window {
+        background: linear-gradient(180deg, rgba(246, 252, 248, 0.98), rgba(240, 249, 244, 0.92));
+        border-color: rgba(52, 168, 83, 0.1);
+      }
+
+      .metric-card.primary-window .metric strong {
+        font-size: 1.16rem;
+      }
+
+      .metric-card.secondary-window {
+        background: rgba(255, 255, 255, 0.82);
       }
 
       .metric-title {
-        margin: 0 0 10px;
-        font-size: 0.76rem;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
+        margin: 0 0 8px;
+        font-size: 0.72rem;
+        letter-spacing: 0.04em;
         color: var(--muted);
       }
 
@@ -891,19 +1146,18 @@ export function renderHtml() {
       }
 
       .metric strong {
-        font-size: 1.08rem;
+        font-size: 0.98rem;
       }
 
       .metric-label {
-        font-size: 0.78rem;
-        color: var(--muted);
+        display: none;
       }
 
       .metric-bar {
-        height: 10px;
+        height: 8px;
         overflow: hidden;
         border-radius: 999px;
-        background: rgba(67, 52, 38, 0.1);
+        background: rgba(29, 29, 31, 0.08);
       }
 
       .metric-bar-fill {
@@ -944,18 +1198,19 @@ export function renderHtml() {
 
       .metric-meta small {
         color: var(--muted);
+        font-size: 0.72rem;
       }
 
       .countdown {
         display: inline-flex;
         align-items: center;
-        min-height: 24px;
+        min-height: 22px;
         padding: 3px 8px;
         border-radius: 999px;
-        background: rgba(15, 109, 89, 0.08);
-        color: var(--accent);
+        background: rgba(242, 242, 247, 0.96);
+        color: var(--text);
         font-family: var(--mono);
-        font-size: 0.75rem;
+        font-size: 0.72rem;
       }
 
       .countdown.soon {
@@ -970,33 +1225,37 @@ export function renderHtml() {
 
       .profile-side {
         display: grid;
-        gap: 14px;
+        gap: 12px;
         align-content: start;
       }
 
       .profile-insight {
-        padding: 14px;
+        padding: 12px 0 0;
         border-radius: var(--radius-md);
-        border: 1px solid rgba(67, 52, 38, 0.08);
-        background: rgba(255, 255, 255, 0.72);
+        border: 0;
+        background: transparent;
       }
 
-      .profile-insight h3 {
-        font-size: 1rem;
-        margin-bottom: 10px;
-      }
+      .profile-insight h3 { display: none; }
 
       .profile-insight p {
         margin: 0;
         color: var(--muted);
-        font-size: 0.9rem;
-        line-height: 1.6;
+        font-size: 0.8rem;
+        line-height: 1.45;
       }
 
       .profile-actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
+        gap: 6px;
+      }
+
+      .profile-actions .button-primary,
+      .profile-actions .button-secondary,
+      .profile-actions .button-ghost {
+        min-height: 38px;
+        padding: 9px 13px;
       }
 
       .error-text {
@@ -1192,14 +1451,10 @@ export function renderHtml() {
 
       @media (max-width: 1200px) {
         .summary-grid {
-          grid-template-columns: minmax(0, 1fr) minmax(260px, 0.8fr);
+          grid-template-columns: 1fr;
         }
 
-        .summary-grid > :last-child {
-          grid-column: 1 / -1;
-        }
-
-        .dashboard-grid {
+        .settings-layout {
           grid-template-columns: 1fr;
         }
       }
@@ -1218,7 +1473,18 @@ export function renderHtml() {
           grid-template-columns: 1fr;
         }
 
-        .profile-card {
+        .spotlight-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .spotlight-visual {
+          justify-items: start;
+        }
+
+        .stat-grid.compact,
+        .summary-meta,
+        .profile-list,
+        .metrics-column {
           grid-template-columns: 1fr;
         }
       }
@@ -1238,8 +1504,8 @@ export function renderHtml() {
         }
 
         .brand-mark {
-          width: 88px;
-          height: 88px;
+          width: 64px;
+          height: 64px;
         }
 
         .profile-id-input {
@@ -1278,10 +1544,10 @@ export function renderHtml() {
           <div class="brand-panel">
             <div class="brand-mark">${HEADER_LOGO_SVG}</div>
             <div>
-              <p class="eyebrow">OpenClaw / Codex 账户中枢</p>
-              <h1>Codex Auth Dashboard</h1>
-              <p class="lede">统一查看额度、推荐顺序和 OAuth 账号操作。这个面板专注在“下一步该用哪个账号”，把用量判断、排序写入和账号维护收束成一个更完整的产品界面。</p>
-              <div class="hero-note"><strong>本地运行</strong><span>直接读取 OpenClaw JSON 文件，不依赖 OpenClaw 源码。</span></div>
+              <p class="eyebrow">Codex Accounts</p>
+              <h1>一眼看清哪个账号还能用</h1>
+              <p class="lede">推荐、额度和切换动作放在同一层，不再靠长说明理解状态。</p>
+              <div class="hero-note"><strong>本地</strong><span>账号数据只留在当前设备</span></div>
             </div>
           </div>
           <div class="masthead-actions">
@@ -1294,62 +1560,58 @@ export function renderHtml() {
 
         <div class="summary-grid">
           <section class="spotlight-card">
-            <div class="section-kicker">当前建议</div>
             <div class="spotlight-head">
               <div>
                 <h2 id="spotlightName" class="spotlight-name">等待加载</h2>
                 <div id="spotlightProfileId" class="spotlight-id">-</div>
               </div>
-              <div id="spotlightRank" class="spotlight-rank">Top</div>
+              <div id="spotlightRank" class="spotlight-rank">01</div>
             </div>
-            <p id="spotlightReason" class="spotlight-reason">正在读取账号额度与排序信息。</p>
-            <div id="spotlightTags" class="tag-row"></div>
+            <div class="spotlight-grid">
+              <div>
+                <p id="spotlightReason" class="spotlight-reason">正在读取账号额度与排序信息。</p>
+                <div id="spotlightTags" class="tag-row"></div>
+              </div>
+              <div class="spotlight-visual">
+                <div id="spotlightQuotaRing" class="quota-ring">
+                  <div class="quota-ring-core">
+                    <div id="spotlightQuotaValue" class="quota-ring-value">--%</div>
+                    <div class="quota-ring-label">7天</div>
+                  </div>
+                </div>
+                <div id="spotlightWindowCapsule" class="spotlight-capsule">重置未知</div>
+              </div>
+            </div>
             <div class="spotlight-actions">
-              <button id="spotlightApplyButton" class="button-primary" type="button">一键置顶推荐账号</button>
-              <button id="spotlightRefreshButton" class="button-secondary" type="button">重新检查额度</button>
+              <button id="spotlightApplyButton" class="button-primary" type="button">置顶</button>
+              <button id="spotlightRefreshButton" class="button-secondary" type="button">刷新</button>
             </div>
           </section>
 
           <section class="summary-card">
-            <div class="section-kicker">运行概览</div>
-            <h3>今天先看这里</h3>
-            <p class="summary-copy">把决策性的数字单独拿出来，减少在列表里来回对比的成本。</p>
-            <div class="stat-grid">
-              <div class="stat-box">
+            <h3>概览</h3>
+            <div class="stat-grid compact">
+              <div class="stat-box emphasis total">
                 <div class="stat-label">账号数</div>
                 <div id="profilesCountValue" class="stat-value">-</div>
               </div>
-              <div class="stat-box">
-                <div class="stat-label">待处理告警</div>
-                <div id="warningsCountValue" class="stat-value">-</div>
+              <div class="stat-box emphasis depleted">
+                <div class="stat-label">7 天已耗尽</div>
+                <div id="depletedProfilesValue" class="stat-value">-</div>
               </div>
-              <div class="stat-box">
-                <div class="stat-label">下一次重置</div>
-                <div id="nextResetValue" class="stat-value">-</div>
+              <div class="stat-box emphasis available">
+                <div class="stat-label">7 天还有额度</div>
+                <div id="availableProfilesValue" class="stat-value">-</div>
               </div>
             </div>
-          </section>
-
-          <section class="summary-card">
-            <div class="section-kicker">环境快照</div>
-            <h3>当前连接</h3>
-            <p class="summary-copy">路径与 agent 保持可见，但不再挤占主决策区。</p>
-            <div class="snapshot-grid">
-              <div class="snapshot-item">
-                <div class="stat-label">Agent</div>
-                <div id="agentValue" class="snapshot-value">-</div>
+            <div class="summary-meta">
+              <div class="summary-meta-item">
+                <div class="stat-label">待处理提醒</div>
+                <div id="warningsCountValue" class="summary-meta-value">-</div>
               </div>
-              <div class="snapshot-item">
-                <div class="stat-label">Auth Store</div>
-                <div id="authValue" class="snapshot-value">-</div>
-              </div>
-              <div class="snapshot-item">
-                <div class="stat-label">Config</div>
-                <div id="configValue" class="snapshot-value">-</div>
-              </div>
-              <div class="snapshot-item">
-                <div class="stat-label">最近刷新</div>
-                <div id="timeValue" class="snapshot-value">-</div>
+              <div class="summary-meta-item">
+                <div class="stat-label">下一次重置</div>
+                <div id="nextResetValue" class="summary-meta-value">-</div>
               </div>
             </div>
           </section>
@@ -1357,93 +1619,124 @@ export function renderHtml() {
       </header>
 
       <div id="flashBanner" class="flash-banner" hidden></div>
-      <section id="alertsGrid" class="alert-grid"></section>
+      <section class="overview-rail">
+        <div id="alertsGrid" class="alert-grid"></div>
+      </section>
 
-      <div class="dashboard-grid">
-        <main class="content-stack">
-          <section class="card panel">
+      <div class="workspace">
+        <section class="card tabbar-card">
+          <nav class="tabbar" aria-label="主导航">
+            <button id="tabAccounts" class="tab-button" type="button" data-tab="accounts" aria-selected="true">
+              <span class="tab-button-label">账号</span>
+            </button>
+            <button id="tabOrder" class="tab-button" type="button" data-tab="order" aria-selected="false">
+              <span class="tab-button-label">顺序</span>
+            </button>
+            <button id="tabSettings" class="tab-button" type="button" data-tab="settings" aria-selected="false">
+              <span class="tab-button-label">设置</span>
+            </button>
+          </nav>
+        </section>
+
+        <div class="tab-panels">
+          <section id="accountsPanel" class="card panel tab-panel" data-tab-panel="accounts">
             <div class="panel-head">
               <div>
-                <div class="section-kicker">排序决策</div>
-                <h2>运行顺序对比</h2>
-                <p class="panel-copy">把当前生效顺序、推荐顺序和文件里保存的顺序并排展示，突出差异而不是只列原始值。</p>
-              </div>
-            </div>
-            <div class="order-grid">
-              <section class="order-card">
-                <h3>当前生效顺序</h3>
-                <div id="effectiveOrder" class="order-pill-row"></div>
-                <p class="panel-copy">运行时实际会优先使用这个顺序。</p>
-              </section>
-              <section class="order-card">
-                <h3>推荐顺序</h3>
-                <div id="recommendedOrder" class="order-pill-row"></div>
-                <p class="panel-copy">基于额度和重置时间计算出的建议排序。</p>
-              </section>
-              <section class="order-card">
-                <h3>auth-profiles.json</h3>
-                <div id="storedOrder" class="order-pill-row"></div>
-                <p class="panel-copy">当前写入文件的顺序，用于核对是否已经落盘。</p>
-              </section>
-            </div>
-          </section>
-
-          <section class="card panel">
-            <div class="panel-head">
-              <div>
-                <div class="section-kicker">账号列表</div>
-                <h2>按推荐顺序排列的 Profiles</h2>
-                <p class="panel-copy">每张卡片同时给出 7 天 / 5 小时额度窗口、当前排序位置、推荐原因和快捷操作，不再依赖宽表格横向对照。</p>
+                <h2>账号</h2>
               </div>
             </div>
             <div id="profilesList" class="profile-list"></div>
             <div id="emptyState" class="empty" hidden>当前没有可展示的 openai-codex 账号。</div>
           </section>
-        </main>
 
-        <aside class="sidebar-stack">
-          <section class="card panel">
+          <section id="orderPanel" class="card panel tab-panel" data-tab-panel="order" hidden>
             <div class="panel-head">
               <div>
-                <div class="section-kicker">设置</div>
-                <h2>自动化与网络</h2>
-                <p class="panel-copy">把常改的行为开关集中在侧边栏，不再和主决策区混在一起。</p>
+                <h2>运行顺序</h2>
               </div>
             </div>
-
-            <div class="settings-section">
-              <label class="field">
-                <span class="field-label">自动刷新间隔（秒）</span>
-                <input id="refreshIntervalInput" class="input" type="number" min="0" step="1" value="0" />
-                <span class="field-note">填 0 关闭自动刷新。推荐只在你持续观察额度时开启。</span>
-              </label>
-
-              <label class="toggle">
-                <input id="autoApplyToggle" type="checkbox" />
-                <span>
-                  <strong>刷新后自动应用推荐顺序</strong>
-                  <span class="field-note">只有推荐顺序和当前生效顺序不一致时才会写入。</span>
-                </span>
-              </label>
-            </div>
-
-            <div class="settings-section">
-              <label class="field">
-                <span class="field-label">额度请求代理 URL</span>
-                <input id="usageProxyUrlInput" class="input" type="text" value="" placeholder="http://127.0.0.1:7890" />
-                <span class="field-note">留空时回退到 HTTPS_PROXY / HTTP_PROXY。</span>
-              </label>
-
-              <label class="toggle">
-                <input id="usageProxyToggle" type="checkbox" />
-                <span>
-                  <strong>获取额度时通过代理</strong>
-                  <span class="field-note">只影响对 ChatGPT 用量接口的请求，不影响本地文件读写。</span>
-                </span>
-              </label>
+            <div class="order-grid">
+              <section class="order-card">
+                <h3>当前</h3>
+                <div id="effectiveOrder" class="order-list"></div>
+              </section>
+              <section class="order-card">
+                <h3>推荐</h3>
+                <div id="recommendedOrder" class="order-list"></div>
+              </section>
             </div>
           </section>
-        </aside>
+
+          <section id="settingsPanel" class="tab-panel" data-tab-panel="settings" hidden>
+            <div class="settings-layout">
+              <section class="card panel">
+                <div class="panel-head">
+                  <div>
+                    <h2>自动化与网络</h2>
+                  </div>
+                </div>
+
+                <div class="settings-section">
+                  <label class="field">
+                    <span class="field-label">自动刷新间隔（秒）</span>
+                    <input id="refreshIntervalInput" class="input" type="number" min="0" step="1" value="0" />
+                    <span class="field-note">填 0 表示关闭。需要盯着额度变化时再打开就够了。</span>
+                  </label>
+
+                  <label class="toggle">
+                    <input id="autoApplyToggle" type="checkbox" />
+                    <span>
+                      <strong>刷新后自动应用推荐顺序</strong>
+                      <span class="field-note">只有推荐顺序和当前顺序不一致时才会自动调整。</span>
+                    </span>
+                  </label>
+                </div>
+
+                <div class="settings-section">
+                  <label class="field">
+                    <span class="field-label">额度请求代理 URL</span>
+                    <input id="usageProxyUrlInput" class="input" type="text" value="" placeholder="http://127.0.0.1:7890" />
+                    <span class="field-note">不填就沿用你当前环境里的代理设置。</span>
+                  </label>
+
+                  <label class="toggle">
+                    <input id="usageProxyToggle" type="checkbox" />
+                    <span>
+                      <strong>获取额度时通过代理</strong>
+                      <span class="field-note">只影响额度查询，不影响本地账号数据和设置。</span>
+                    </span>
+                  </label>
+                </div>
+              </section>
+
+              <section class="card panel">
+                <div class="panel-head">
+                  <div>
+                    <h2>当前连接</h2>
+                  </div>
+                </div>
+                <div class="snapshot-grid">
+                  <div class="snapshot-item">
+                    <div class="stat-label">Agent</div>
+                    <div id="agentValue" class="snapshot-value">-</div>
+                  </div>
+                  <div class="snapshot-item">
+                    <div class="stat-label">账号数据位置</div>
+                    <div id="authValue" class="snapshot-value">-</div>
+                  </div>
+                  <div class="snapshot-item">
+                    <div class="stat-label">配置文件位置</div>
+                    <div id="configValue" class="snapshot-value">-</div>
+                  </div>
+                  <div class="snapshot-item">
+                    <div class="stat-label">最近刷新</div>
+                    <div id="timeValue" class="snapshot-value">-</div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
 
@@ -1454,7 +1747,7 @@ export function renderHtml() {
           <div>
             <div class="modal-eyebrow">New Account</div>
             <h2 id="addModalTitle" class="modal-title">新增 openai-codex 账号</h2>
-            <p class="modal-copy">前缀固定，只需要填写账号后缀。提交后会直接开始 OAuth 登录流程。</p>
+            <p class="modal-copy">前缀固定，只需要填写账号后缀。提交后会直接开始这个账号的登录流程。</p>
           </div>
           <button id="addModalCloseButton" class="icon-button" type="button" aria-label="关闭">×</button>
         </div>
@@ -1479,7 +1772,7 @@ export function renderHtml() {
             <p><code id="addProfilePreview">openai-codex:<span>...</span></code></p>
           </div>
           <div id="addModalError" class="error-line" hidden></div>
-          <p class="modal-note">如果这个后缀已存在，会在写入凭证阶段直接报错，不会覆盖已有账号。</p>
+          <p class="modal-note">如果这个后缀已存在，会直接提示重复，不会覆盖已有账号。</p>
           <div class="modal-actions">
             <button id="addModalCancelButton" class="button-secondary" type="button">取消</button>
             <button id="addModalSubmitButton" class="button-primary" type="submit">开始登录</button>
@@ -1507,14 +1800,14 @@ export function renderHtml() {
           </div>
 
           <label id="renameField" class="field" for="renameProfileIdInput" hidden>
-            <span class="field-label">新的 profileId</span>
+            <span class="field-label">新的账号名称</span>
             <input id="renameProfileIdInput" class="input" type="text" autocomplete="off" spellcheck="false" />
-            <span class="field-note">会同时更新 auth-profiles.json 和 openclaw.json 中对应的 profileId。</span>
+            <span class="field-note">保存后，这个账号会统一使用新的名称。</span>
           </label>
 
           <div id="deleteField" class="modal-detail-card" hidden>
             <strong>删除确认</strong>
-            <p>删除后会同时从 <code>auth-profiles.json</code> 和 <code>openclaw.json</code> 移除对应 auth 信息。</p>
+            <p>删除后，这个账号会从本地账号数据和配置中一起移除。</p>
             <p>这个操作不可撤销。</p>
           </div>
 
@@ -1543,6 +1836,7 @@ export function renderHtml() {
         autoApplyRecommended: false,
         usageProxyEnabled: false,
         usageProxyUrl: "",
+        activeTab: "accounts",
         manageMode: null,
         manageRow: null,
       };
@@ -1551,6 +1845,7 @@ export function renderHtml() {
       const AUTO_APPLY_STORAGE_KEY = "codex-auth-dashboard.auto-apply-after-refresh";
       const USAGE_PROXY_ENABLED_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-enabled";
       const USAGE_PROXY_URL_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-url";
+      const ACTIVE_TAB_STORAGE_KEY = "codex-auth-dashboard.active-tab";
       const PROFILE_ID_PREFIX = "openai-codex:";
 
       const flashBanner = document.getElementById("flashBanner");
@@ -1569,7 +1864,12 @@ export function renderHtml() {
       const spotlightRank = document.getElementById("spotlightRank");
       const spotlightReason = document.getElementById("spotlightReason");
       const spotlightTags = document.getElementById("spotlightTags");
+      const spotlightQuotaRing = document.getElementById("spotlightQuotaRing");
+      const spotlightQuotaValue = document.getElementById("spotlightQuotaValue");
+      const spotlightWindowCapsule = document.getElementById("spotlightWindowCapsule");
       const profilesCountValue = document.getElementById("profilesCountValue");
+      const depletedProfilesValue = document.getElementById("depletedProfilesValue");
+      const availableProfilesValue = document.getElementById("availableProfilesValue");
       const warningsCountValue = document.getElementById("warningsCountValue");
       const nextResetValue = document.getElementById("nextResetValue");
       const agentValue = document.getElementById("agentValue");
@@ -1577,9 +1877,10 @@ export function renderHtml() {
       const configValue = document.getElementById("configValue");
       const timeValue = document.getElementById("timeValue");
       const alertsGrid = document.getElementById("alertsGrid");
+      const tabButtons = Array.from(document.querySelectorAll("[data-tab]"));
+      const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
       const effectiveOrder = document.getElementById("effectiveOrder");
       const recommendedOrder = document.getElementById("recommendedOrder");
-      const storedOrder = document.getElementById("storedOrder");
       const profilesList = document.getElementById("profilesList");
       const emptyState = document.getElementById("emptyState");
 
@@ -1656,6 +1957,53 @@ export function renderHtml() {
         });
       }
 
+      function getRemainingPercent(windowData) {
+        return typeof windowData?.remainingPercent === "number" && Number.isFinite(windowData.remainingPercent)
+          ? Math.max(0, Math.min(100, windowData.remainingPercent))
+          : null;
+      }
+
+      function getQuotaTone(remaining) {
+        if (remaining == null) {
+          return "unknown";
+        }
+        if (remaining >= 60) {
+          return "high";
+        }
+        if (remaining >= 30) {
+          return "medium";
+        }
+        return "low";
+      }
+
+      function getQuotaColor(remaining) {
+        if (remaining == null) {
+          return "rgba(29, 29, 31, 0.16)";
+        }
+        if (remaining >= 60) {
+          return "#34a853";
+        }
+        if (remaining >= 30) {
+          return "#ff9f0a";
+        }
+        return "#ff453a";
+      }
+
+      function summarizeSecondaryWindow(rows) {
+        let depleted = 0;
+        let available = 0;
+        for (const row of rows || []) {
+          const remaining = getRemainingPercent(row.secondary);
+          if (remaining == null) continue;
+          if (remaining <= 0) {
+            depleted += 1;
+          } else {
+            available += 1;
+          }
+        }
+        return { depleted, available };
+      }
+
       function createTag(label, tone = "") {
         const node = document.createElement("span");
         node.className = "meta-tag" + (tone ? " " + tone : "");
@@ -1703,6 +2051,7 @@ export function renderHtml() {
           window.localStorage.setItem(AUTO_APPLY_STORAGE_KEY, String(appState.autoApplyRecommended));
           window.localStorage.setItem(USAGE_PROXY_ENABLED_STORAGE_KEY, String(appState.usageProxyEnabled));
           window.localStorage.setItem(USAGE_PROXY_URL_STORAGE_KEY, appState.usageProxyUrl);
+          window.localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, appState.activeTab);
         } catch {
           // Ignore localStorage failures in restricted browsers.
         }
@@ -1724,13 +2073,36 @@ export function renderHtml() {
           appState.autoApplyRecommended = window.localStorage.getItem(AUTO_APPLY_STORAGE_KEY) === "true";
           appState.usageProxyEnabled = window.localStorage.getItem(USAGE_PROXY_ENABLED_STORAGE_KEY) === "true";
           appState.usageProxyUrl = window.localStorage.getItem(USAGE_PROXY_URL_STORAGE_KEY) || "";
+          const activeTab = window.localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
+          if (activeTab === "accounts" || activeTab === "order" || activeTab === "settings") {
+            appState.activeTab = activeTab;
+          }
         } catch {
           appState.refreshIntervalSeconds = 0;
           appState.autoApplyRecommended = false;
           appState.usageProxyEnabled = false;
           appState.usageProxyUrl = "";
+          appState.activeTab = "accounts";
         }
         syncAutomationControls();
+      }
+
+      function syncTabState() {
+        tabButtons.forEach((button) => {
+          button.setAttribute("aria-selected", button.dataset.tab === appState.activeTab ? "true" : "false");
+        });
+        tabPanels.forEach((panel) => {
+          panel.hidden = panel.dataset.tabPanel !== appState.activeTab;
+        });
+      }
+
+      function setActiveTab(tab) {
+        if (tab !== "accounts" && tab !== "order" && tab !== "settings") {
+          return;
+        }
+        appState.activeTab = tab;
+        syncTabState();
+        persistAutomationSettings();
       }
 
       function scheduleAutoRefresh() {
@@ -1885,9 +2257,9 @@ export function renderHtml() {
         appState.manageRow = row;
         manageModalEyebrow.textContent = "Rename Profile";
         manageModalTitle.textContent = "重命名账号";
-        manageModalCopy.textContent = "统一修改 profileId，并同步更新 auth-profiles.json 与 openclaw.json。";
+        manageModalCopy.textContent = "修改这个账号的名称，现有登录信息会跟着一起更新。";
         manageProfileIdText.textContent = row.profileId;
-        manageProfileHint.textContent = row.email || row.displayLabel || "这个账号的 profileId 将被整体替换。";
+        manageProfileHint.textContent = row.email || row.displayLabel || "保存后会直接使用新的账号名称。";
         renameField.hidden = false;
         deleteField.hidden = true;
         renameProfileIdInput.value = row.profileId.replace(/:default$/, ":work");
@@ -1906,7 +2278,7 @@ export function renderHtml() {
         appState.manageRow = row;
         manageModalEyebrow.textContent = "Delete Profile";
         manageModalTitle.textContent = "删除账号";
-        manageModalCopy.textContent = "删除会同时影响 auth-profiles.json 和 openclaw.json，对应凭证信息会一起移除。";
+        manageModalCopy.textContent = "删除后，这个账号会从当前面板和本地配置里一起移除。";
         manageProfileIdText.textContent = row.profileId;
         manageProfileHint.textContent = row.email || row.displayLabel || "确认后将立即执行删除。";
         renameField.hidden = true;
@@ -1934,23 +2306,63 @@ export function renderHtml() {
           target.appendChild(createTag("无"));
           return;
         }
+        const rowsById = new Map((appState.data?.rows || []).map((row) => [row.profileId, row]));
         order.forEach((profileId, index) => {
-          const node = document.createElement("span");
-          let tone = "";
-          if (currentLead && profileId === currentLead && index === 0) {
-            tone = "ok";
-          } else if (index === 0) {
-            tone = "info";
-          }
-          node.className = "order-pill" + (tone ? " " + tone : "") + (index === 0 ? " is-primary" : "");
-          node.textContent = String(index + 1) + ". " + profileId;
-          target.appendChild(node);
+          const row = rowsById.get(profileId);
+          const remaining = getRemainingPercent(row?.secondary);
+
+          const entry = document.createElement("div");
+          entry.className = "order-entry";
+
+          const head = document.createElement("div");
+          head.className = "order-entry-head";
+
+          const rank = document.createElement("div");
+          rank.className = "order-entry-rank";
+          rank.textContent = String(index + 1);
+
+          const name = document.createElement("div");
+          name.className = "order-entry-name";
+          const strong = document.createElement("strong");
+          strong.textContent = row?.displayLabel || profileId;
+          const sub = document.createElement("span");
+          sub.textContent = profileId;
+          name.appendChild(strong);
+          name.appendChild(sub);
+
+          const meta = document.createElement("div");
+          meta.className = "order-entry-meta";
+          meta.textContent = remaining == null ? "7 天未知" : "7 天 " + remaining + "%";
+
+          head.appendChild(rank);
+          head.appendChild(name);
+          head.appendChild(meta);
+          entry.appendChild(head);
+
+          const meter = document.createElement("div");
+          meter.className = "micro-meter " + getQuotaTone(remaining);
+          const fill = document.createElement("div");
+          fill.className = "micro-meter-fill";
+          fill.style.width = String(remaining == null ? 0 : remaining) + "%";
+          meter.appendChild(fill);
+          entry.appendChild(meter);
+
+          const foot = document.createElement("div");
+          foot.className = "order-entry-foot";
+          const reset = document.createElement("span");
+          reset.textContent = row?.secondary?.resetAt
+            ? formatCountdown(row.secondary.resetAt).text.replace(/^倒计时 /, "")
+            : "重置时间未知";
+          foot.appendChild(reset);
+          entry.appendChild(foot);
+
+          target.appendChild(entry);
         });
       }
 
-      function renderMetric(windowData, title) {
+      function renderMetric(windowData, title, variant = "") {
         const wrapper = document.createElement("div");
-        wrapper.className = "metric-card";
+        wrapper.className = "metric-card" + (variant ? " " + variant : "");
 
         const heading = document.createElement("div");
         heading.className = "metric-title";
@@ -1964,7 +2376,8 @@ export function renderHtml() {
         head.className = "metric-head";
 
         const strong = document.createElement("strong");
-        strong.textContent = windowData.remainingPercent == null ? "未知" : windowData.remainingPercent + "% 剩余";
+        const remaining = getRemainingPercent(windowData);
+        strong.textContent = remaining == null ? "未知" : remaining + "% 剩余";
         const label = document.createElement("span");
         label.className = "metric-label";
         label.textContent = windowData.label || "quota";
@@ -1973,9 +2386,8 @@ export function renderHtml() {
         metric.appendChild(head);
 
         const bar = document.createElement("div");
-        const remaining = windowData.remainingPercent;
-        const width = remaining == null ? 0 : Math.max(0, Math.min(100, remaining));
-        const tone = remaining == null ? "unknown" : width >= 60 ? "high" : width >= 30 ? "medium" : "low";
+        const width = remaining == null ? 0 : remaining;
+        const tone = getQuotaTone(remaining);
         bar.className = "metric-bar " + tone;
         bar.setAttribute("role", "progressbar");
         bar.setAttribute("aria-label", title + " remaining quota");
@@ -2009,53 +2421,44 @@ export function renderHtml() {
         if (!row) {
           return {
             title: "暂无可推荐账号",
-            detail: "当前没有可用的 openai-codex 账号数据。",
+            detail: "等待账号数据",
             tone: "warn",
-            tags: ["等待账号数据"],
+            tags: ["尚未读取"],
           };
         }
 
         if (row.error) {
           return {
-            title: "额度信息获取失败",
-            detail: row.error,
+            title: "额度读取失败",
+            detail: "检查网络或重新登录",
             tone: "danger",
-            tags: ["请检查凭证或网络后再排序"],
+            tags: ["需要处理"],
           };
         }
 
         const tags = [];
         if (row.primary?.remainingPercent != null) {
-          tags.push("5h 剩余 " + row.primary.remainingPercent + "%");
+          tags.push("5h " + row.primary.remainingPercent + "%");
         }
         if (row.secondary?.remainingPercent != null) {
-          tags.push("7d 剩余 " + row.secondary.remainingPercent + "%");
+          tags.push("7d " + row.secondary.remainingPercent + "%");
         }
         if (row.plan) {
-          tags.push("Plan: " + row.plan);
+          tags.push("套餐 " + row.plan);
         }
         if (row.currentOrderIndex === 0) {
-          tags.push("当前已在首位");
+          tags.push("已在首位");
         } else if (row.currentOrderIndex < Number.MAX_SAFE_INTEGER) {
-          tags.push("当前位于第 " + String(row.currentOrderIndex + 1) + " 位");
+          tags.push("当前 " + String(row.currentOrderIndex + 1));
         } else {
-          tags.push("当前未进入运行顺序");
-        }
-
-        const detailParts = [];
-        if (row.primary?.remainingPercent != null) {
-          detailParts.push("5 小时窗口剩余 " + row.primary.remainingPercent + "%");
-        }
-        if (row.secondary?.remainingPercent != null) {
-          detailParts.push("7 天窗口剩余 " + row.secondary.remainingPercent + "%");
-        }
-        if (row.primary?.resetAt) {
-          detailParts.push(formatCountdown(row.primary.resetAt).text.replace(/^倒计时 /, "") + "后重置主窗口");
+          tags.push("未进顺序");
         }
 
         return {
-          title: row.currentOrderIndex === 0 ? "当前首位已是推荐账号" : "建议把这个账号置于首位",
-          detail: detailParts.join("，") || "该账号在综合可用额度上排名第一。",
+          title: row.currentOrderIndex === 0 ? "现在就用它" : "下一位建议用它",
+          detail: row.secondary?.resetAt
+            ? "7天窗口 " + formatCountdown(row.secondary.resetAt).text.replace(/^倒计时 /, "")
+            : "7天窗口可用",
           tone: row.currentOrderIndex === 0 ? "ok" : "info",
           tags,
         };
@@ -2094,19 +2497,86 @@ export function renderHtml() {
 
       function buildProfileReason(row) {
         if (row.error) {
-          return row.error;
+          return "额度异常，建议重新检查";
         }
         const parts = [];
-        if (row.primary?.remainingPercent != null) {
-          parts.push("5h 剩余 " + row.primary.remainingPercent + "%");
-        }
         if (row.secondary?.remainingPercent != null) {
-          parts.push("7d 剩余 " + row.secondary.remainingPercent + "%");
+          parts.push("7d " + row.secondary.remainingPercent + "%");
+        }
+        if (row.primary?.remainingPercent != null) {
+          parts.push("5h " + row.primary.remainingPercent + "%");
         }
         if (row.primary?.resetAt) {
-          parts.push(formatCountdown(row.primary.resetAt).text);
+          parts.push(formatCountdown(row.primary.resetAt).text.replace(/^倒计时 /, ""));
         }
-        return parts.join(" · ") || "额度数据暂不可用。";
+        return parts.join(" · ") || "额度未知";
+      }
+
+      function humanizeSystemNote(note) {
+        if (!note) {
+          return "";
+        }
+        if (note.includes("Applying order updates")) {
+          return "应用推荐顺序后，系统会立即按新的账号顺序继续工作。";
+        }
+        if (note.includes("Only auto-selected Codex session overrides")) {
+          return "你手动指定的账号不会被自动改掉。";
+        }
+        if (note.includes("This tool is standalone")) {
+          return "这个面板可以独立查看和管理账号。";
+        }
+        return note;
+      }
+
+      function humanizeWarning(note) {
+        if (!note) {
+          return "";
+        }
+        if (note.includes("auth-profiles.json was not found")) {
+          return "还没找到账号数据，暂时无法读取账号列表。";
+        }
+        if (note.includes("openclaw.json was not found")) {
+          return "还没找到 OpenClaw 配置，补齐配置功能暂时不可用。";
+        }
+        if (note.includes("No openai-codex profiles were found")) {
+          return "当前还没有可用的 Codex 账号。";
+        }
+        if (note.includes("openclaw.json auth.profiles is missing")) {
+          return "配置里缺少这些账号，请补齐后再使用: " + note.split(": ").slice(1).join(": ");
+        }
+        if (note.includes("openclaw.json auth.order omits")) {
+          return "当前顺序里缺少这些账号，建议补齐配置: " + note.split(": ").slice(1).join(": ");
+        }
+        if (note.includes("openclaw.json auth.order references unknown profiles")) {
+          return "顺序里有无法识别的账号，请检查配置: " + note.split(": ").slice(1).join(": ");
+        }
+        if (note.includes("auth-profiles.json order omits")) {
+          return "账号顺序里缺少这些账号，建议重新同步: " + note.split(": ").slice(1).join(": ");
+        }
+        if (note.includes("openclaw.json auth.order differs from auth-profiles.json order")) {
+          return "当前实际顺序和配置里看到的顺序不一致，建议同步一次。";
+        }
+        if (note.includes("Profiles still using :default should be renamed")) {
+          return "这些账号名称还比较临时，建议改成更容易识别的名字: " + note.split(": ").slice(1).join(": ");
+        }
+        return note;
+      }
+
+      function humanizeLoginStatus(status) {
+        switch (status) {
+          case "pending":
+            return "等待开始";
+          case "authorizing":
+            return "等待浏览器确认";
+          case "polling":
+            return "正在等待登录完成";
+          case "completed":
+            return "登录完成";
+          case "failed":
+            return "登录失败";
+          default:
+            return status || "未知";
+        }
       }
 
       function createAlertCard(title, tone, items) {
@@ -2126,7 +2596,7 @@ export function renderHtml() {
 
         const list = document.createElement("div");
         list.className = "alert-list";
-        for (const item of items) {
+        for (const item of items.slice(0, 2)) {
           const line = document.createElement("div");
           line.className = "alert-item";
           line.textContent = item;
@@ -2141,29 +2611,25 @@ export function renderHtml() {
         const cards = [];
 
         if (appState.loginTask) {
-          const items = [
-            "账号: " + appState.loginTask.profileId,
-            "状态: " + appState.loginTask.status,
-          ];
-          if (appState.loginTask.instructions) {
-            items.push(appState.loginTask.instructions);
-          }
-          if (appState.loginTask.error) {
-            items.push(appState.loginTask.error);
-          }
-          cards.push(createAlertCard("OAuth 登录流程", appState.loginTask.status === "failed" ? "danger" : "info", items));
+          cards.push(
+            createAlertCard(
+              "登录",
+              appState.loginTask.status === "failed" ? "danger" : "info",
+              [humanizeLoginStatus(appState.loginTask.status)],
+            ),
+          );
         }
 
         if (data?.warnings?.length) {
-          cards.push(createAlertCard("需要处理的告警", "warn", data.warnings));
+          cards.push(createAlertCard("提醒", "warn", [String(data.warnings.length) + " 项待处理"]));
         }
 
         if (data?.notes?.length) {
-          cards.push(createAlertCard("系统说明", "ok", data.notes));
+          cards.push(createAlertCard("说明", "ok", [humanizeSystemNote(data.notes[0])]));
         }
 
         if (!cards.length) {
-          cards.push(createAlertCard("状态正常", "ok", ["当前没有额外告警。你可以继续按推荐顺序使用账号。"]));
+          cards.push(createAlertCard("状态", "ok", ["一切正常"]));
         }
 
         const fragment = document.createDocumentFragment();
@@ -2174,18 +2640,28 @@ export function renderHtml() {
       function renderSpotlight(data) {
         const row = data?.rows?.[0] || null;
         const summary = buildSpotlightSummary(row);
+        const remaining = getRemainingPercent(row?.secondary);
         spotlightName.textContent = row ? row.displayLabel : "暂无推荐账号";
         spotlightProfileId.textContent = row ? row.profileId : "-";
-        spotlightRank.textContent = row ? "Top 01" : "Top --";
-        spotlightReason.textContent = summary.title + "。 " + summary.detail;
+        spotlightRank.textContent = row ? "01" : "--";
+        spotlightReason.textContent = summary.title + " · " + summary.detail;
         spotlightTags.innerHTML = "";
         summary.tags.forEach((item) => {
           spotlightTags.appendChild(createTag(item, summary.tone));
         });
+        spotlightQuotaValue.textContent = remaining == null ? "--%" : remaining + "%";
+        spotlightQuotaRing.style.setProperty("--ring-progress", String(remaining == null ? 0 : remaining));
+        spotlightQuotaRing.style.setProperty("--ring-color", getQuotaColor(remaining));
+        spotlightWindowCapsule.textContent = row?.secondary?.resetAt
+          ? formatCountdown(row.secondary.resetAt).text.replace(/^倒计时 /, "")
+          : "重置未知";
       }
 
       function renderOverviewStats(data) {
         profilesCountValue.textContent = String(data.rows.length);
+        const summary = summarizeSecondaryWindow(data.rows);
+        depletedProfilesValue.textContent = String(summary.depleted);
+        availableProfilesValue.textContent = String(summary.available);
         warningsCountValue.textContent = String(data.warnings.length);
         const nextReset = collectNextReset(data);
         nextResetValue.textContent = nextReset ? formatCountdown(nextReset).text.replace(/^倒计时 /, "") : "未知";
@@ -2205,14 +2681,13 @@ export function renderHtml() {
           const isTop = row.recommendedOrderIndex === 0;
           card.className = "profile-card" + (isTop ? " top" : "") + (row.error ? " problem" : "");
 
-          const main = document.createElement("div");
-          main.className = "profile-main";
-
           const head = document.createElement("div");
           head.className = "profile-head";
           const rank = document.createElement("div");
           rank.className = "rank-badge";
           rank.textContent = row.recommendedOrderIndex >= 0 ? "#" + String(row.recommendedOrderIndex + 1) : "--";
+          const main = document.createElement("div");
+          main.className = "profile-main";
           const headCopy = document.createElement("div");
           const name = document.createElement("div");
           name.className = "profile-name";
@@ -2222,31 +2697,39 @@ export function renderHtml() {
           profileId.textContent = row.profileId;
           headCopy.appendChild(name);
           headCopy.appendChild(profileId);
+          main.appendChild(headCopy);
+
+          const leadTag = document.createElement("div");
+          leadTag.className = "meta-tag " + (isTop ? "ok" : "info");
+          leadTag.textContent = row.recommendedOrderIndex >= 0
+            ? (isTop ? "当前推荐首位" : "推荐第 " + String(row.recommendedOrderIndex + 1) + " 位")
+            : "等待排序";
+
           head.appendChild(rank);
-          head.appendChild(headCopy);
-          main.appendChild(head);
+          head.appendChild(main);
+          head.appendChild(leadTag);
+          card.appendChild(head);
 
           const statusRow = document.createElement("div");
           statusRow.className = "status-badge-row";
-          statusRow.appendChild(createStatusBadge("类型 " + row.type));
-          statusRow.appendChild(createStatusBadge(buildOrderStatus(row), isTop ? "ok" : "info"));
-          if (row.plan) statusRow.appendChild(createStatusBadge("Plan " + row.plan));
-          if (row.email) statusRow.appendChild(createStatusBadge(row.email));
-          if (row.accountId) statusRow.appendChild(createStatusBadge("accountId " + row.accountId));
+          if (row.plan) statusRow.appendChild(createStatusBadge("套餐 " + row.plan));
+          if (row.currentOrderIndex === 0) statusRow.appendChild(createStatusBadge("正在使用", "ok"));
           if (row.expiresAt) statusRow.appendChild(createStatusBadge("过期 " + formatTime(row.expiresAt), "warn"));
-          main.appendChild(statusRow);
+          if (row.error) statusRow.appendChild(createStatusBadge("异常", "danger"));
+          card.appendChild(statusRow);
 
           const metrics = document.createElement("div");
           metrics.className = "metrics-column";
-          metrics.appendChild(renderMetric(row.secondary, "7 天窗口"));
-          metrics.appendChild(renderMetric(row.primary, "5 小时窗口"));
+          metrics.appendChild(renderMetric(row.secondary, "7 天窗口", "primary-window"));
+          metrics.appendChild(renderMetric(row.primary, "5 小时窗口", "secondary-window"));
+          card.appendChild(metrics);
 
           const side = document.createElement("div");
           side.className = "profile-side";
           const insight = document.createElement("div");
           insight.className = "profile-insight";
           const insightTitle = document.createElement("h3");
-          insightTitle.textContent = isTop ? "推荐理由" : "状态摘要";
+          insightTitle.textContent = isTop ? "为什么先用它" : "账号状态";
           const insightText = document.createElement("p");
           insightText.textContent = buildProfileReason(row);
           insight.appendChild(insightTitle);
@@ -2264,7 +2747,7 @@ export function renderHtml() {
           const pinButton = document.createElement("button");
           pinButton.type = "button";
           pinButton.className = isTop ? "button-secondary" : "button-primary";
-          pinButton.textContent = isTop ? "已是首选" : "设为首位";
+          pinButton.textContent = isTop ? "已置顶" : "置顶";
           pinButton.disabled = isTop || appState.busy;
           pinButton.dataset.actionButton = "true";
           pinButton.addEventListener("click", () => {
@@ -2275,7 +2758,7 @@ export function renderHtml() {
           const lastButton = document.createElement("button");
           lastButton.type = "button";
           lastButton.className = "button-secondary";
-          lastButton.textContent = "移到末位";
+          lastButton.textContent = "末位";
           lastButton.disabled = appState.busy;
           lastButton.dataset.actionButton = "true";
           lastButton.addEventListener("click", () => {
@@ -2286,7 +2769,7 @@ export function renderHtml() {
           const renameButton = document.createElement("button");
           renameButton.type = "button";
           renameButton.className = "button-secondary";
-          renameButton.textContent = "重命名";
+          renameButton.textContent = "改名";
           renameButton.disabled = appState.busy;
           renameButton.dataset.actionButton = "true";
           renameButton.addEventListener("click", () => {
@@ -2311,8 +2794,6 @@ export function renderHtml() {
           side.appendChild(insight);
           side.appendChild(actions);
 
-          card.appendChild(main);
-          card.appendChild(metrics);
           card.appendChild(side);
           fragment.appendChild(card);
         }
@@ -2330,9 +2811,9 @@ export function renderHtml() {
         timeValue.textContent = new Date(data.generatedAt).toLocaleString("zh-CN", { hour12: false });
         renderOrder(effectiveOrder, data.currentEffectiveOrder, data.recommendedOrder[0]);
         renderOrder(recommendedOrder, data.recommendedOrder, data.recommendedOrder[0]);
-        renderOrder(storedOrder, data.storedOrder, data.recommendedOrder[0]);
         renderAlerts(data);
         renderProfileCards(data);
+        syncTabState();
         syncControlState();
       }
 
@@ -2382,7 +2863,7 @@ export function renderHtml() {
         try {
           const data = await postJson("/api/apply-order", { order });
           render(data);
-          setBusy(false, "顺序已写入，并已触发 gateway 热重载", "success");
+          setBusy(false, "顺序已更新，推荐结果已经生效", "success");
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }
@@ -2397,11 +2878,11 @@ export function renderHtml() {
       }
 
       async function syncConfig() {
-        setBusy(true, "正在补齐 openclaw.json...", "info");
+        setBusy(true, "正在补齐缺失配置...", "info");
         try {
           const data = await postJson("/api/sync-config");
           render(data);
-          setBusy(false, "openclaw.json 已补齐缺失项", "success");
+          setBusy(false, "缺失配置已补齐", "success");
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }
@@ -2529,12 +3010,12 @@ export function renderHtml() {
         if (appState.manageMode === "rename") {
           const nextProfileId = renameProfileIdInput.value.trim();
           if (!nextProfileId) {
-            setManageModalError("新的 profileId 不能为空。");
+            setManageModalError("新的账号名称不能为空。");
             renameProfileIdInput.focus();
             return;
           }
           if (nextProfileId === appState.manageRow.profileId) {
-            setManageModalError("新的 profileId 不能和当前值相同。");
+            setManageModalError("新的账号名称不能和当前值相同。");
             renameProfileIdInput.focus();
             return;
           }
@@ -2602,6 +3083,12 @@ export function renderHtml() {
         setFlash(appState.usageProxyEnabled ? "已开启额度请求代理" : "已关闭额度请求代理", "info");
       });
 
+      tabButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          setActiveTab(button.dataset.tab || "accounts");
+        });
+      });
+
       addProfileSuffixInput.addEventListener("input", () => {
         renderAddAccountPreview();
         if (!addModalError.hidden) {
@@ -2665,6 +3152,7 @@ export function renderHtml() {
       });
 
       loadAutomationSettings();
+      syncTabState();
       refreshState();
       setInterval(updateCountdowns, 1000);
     </script>
