@@ -1024,7 +1024,7 @@ export function renderHtml() {
       .profile-card {
         display: grid;
         gap: 12px;
-        padding: 18px 18px 16px;
+        padding: 18px;
         border-radius: var(--radius-lg);
         border: 1px solid rgba(29, 29, 31, 0.06);
         background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 248, 250, 0.94));
@@ -1042,12 +1042,19 @@ export function renderHtml() {
       .profile-head {
         display: flex;
         gap: 12px;
-        align-items: start;
+        align-items: center;
         justify-content: space-between;
       }
 
       .profile-main {
         min-width: 0;
+      }
+
+      .profile-header-meta {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
       }
 
       .rank-badge {
@@ -1065,6 +1072,12 @@ export function renderHtml() {
         font-size: 0.76rem;
       }
 
+      .profile-topline {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
       .profile-name {
         font-family: var(--display);
         font-size: 1.08rem;
@@ -1072,20 +1085,36 @@ export function renderHtml() {
         font-weight: 600;
       }
 
-      .profile-id {
+      .profile-subline {
         margin-top: 4px;
         color: var(--muted);
-        font-family: var(--mono);
-        font-size: 0.72rem;
+        font-size: 0.78rem;
         line-height: 1.35;
-        word-break: break-all;
       }
 
-      .status-badge-row {
+      .profile-state-row {
         display: flex;
-        flex-wrap: wrap;
+        align-items: center;
         gap: 6px;
-        margin-top: 4px;
+        color: var(--muted);
+        font-size: 0.74rem;
+      }
+
+      .state-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        flex: 0 0 auto;
+      }
+
+      .state-dot.high { color: var(--ok); }
+      .state-dot.medium { color: var(--warn); }
+      .state-dot.low { color: var(--danger); }
+      .state-dot.unknown { color: var(--muted); }
+
+      .profile-main-window {
+        min-width: 0;
       }
 
       .status-badge {
@@ -1100,10 +1129,13 @@ export function renderHtml() {
         color: var(--text);
       }
 
-      .metrics-column {
-        display: grid;
-        gap: 12px;
-        grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+      .profile-secondary-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        align-items: center;
+        color: var(--muted);
+        font-size: 0.76rem;
       }
 
       .metric-card {
@@ -1223,31 +1255,10 @@ export function renderHtml() {
         background: rgba(161, 54, 51, 0.1);
       }
 
-      .profile-side {
-        display: grid;
-        gap: 12px;
-        align-content: start;
-      }
-
-      .profile-insight {
-        padding: 12px 0 0;
-        border-radius: var(--radius-md);
-        border: 0;
-        background: transparent;
-      }
-
-      .profile-insight h3 { display: none; }
-
-      .profile-insight p {
-        margin: 0;
-        color: var(--muted);
-        font-size: 0.8rem;
-        line-height: 1.45;
-      }
-
       .profile-actions {
         display: flex;
-        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
         gap: 6px;
       }
 
@@ -1258,11 +1269,65 @@ export function renderHtml() {
         padding: 9px 13px;
       }
 
-      .error-text {
-        margin-top: 10px;
+      .profile-menu {
+        position: relative;
+      }
+
+      .profile-menu summary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 40px;
+        min-height: 38px;
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        background: rgba(242, 242, 247, 0.92);
+        color: var(--text);
+        cursor: pointer;
+        list-style: none;
+      }
+
+      .profile-menu summary::-webkit-details-marker { display: none; }
+
+      .profile-menu[open] summary {
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+      }
+
+      .profile-menu-list {
+        position: absolute;
+        right: 0;
+        top: calc(100% + 8px);
+        z-index: 4;
+        display: grid;
+        gap: 6px;
+        min-width: 112px;
+        padding: 8px;
+        border-radius: 16px;
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 16px 30px rgba(0, 0, 0, 0.08);
+      }
+
+      .profile-menu-button {
+        min-height: 34px;
+        padding: 8px 10px;
+        border-radius: 12px;
+        background: rgba(242, 242, 247, 0.86);
+        color: var(--text);
+        text-align: left;
+      }
+
+      .profile-menu-button.danger {
         color: var(--danger);
-        font-size: 0.86rem;
-        line-height: 1.55;
+      }
+
+      .error-text {
+        margin-top: 2px;
+        color: var(--danger);
+        font-size: 0.76rem;
+        line-height: 1.4;
       }
 
       .empty {
@@ -1546,8 +1611,7 @@ export function renderHtml() {
             <div>
               <p class="eyebrow">Codex Accounts</p>
               <h1>一眼看清哪个账号还能用</h1>
-              <p class="lede">推荐、额度和切换动作放在同一层，不再靠长说明理解状态。</p>
-              <div class="hero-note"><strong>本地</strong><span>账号数据只留在当前设备</span></div>
+              <div class="hero-note"><strong>仅本地</strong></div>
             </div>
           </div>
           <div class="masthead-actions">
@@ -1569,7 +1633,7 @@ export function renderHtml() {
             </div>
             <div class="spotlight-grid">
               <div>
-                <p id="spotlightReason" class="spotlight-reason">正在读取账号额度与排序信息。</p>
+                <p id="spotlightReason" class="spotlight-reason">正在读取</p>
                 <div id="spotlightTags" class="tag-row"></div>
               </div>
               <div class="spotlight-visual">
@@ -1646,7 +1710,7 @@ export function renderHtml() {
               </div>
             </div>
             <div id="profilesList" class="profile-list"></div>
-            <div id="emptyState" class="empty" hidden>当前没有可展示的 openai-codex 账号。</div>
+            <div id="emptyState" class="empty" hidden>还没有账号</div>
           </section>
 
           <section id="orderPanel" class="card panel tab-panel" data-tab-panel="order" hidden>
@@ -1672,38 +1736,37 @@ export function renderHtml() {
               <section class="card panel">
                 <div class="panel-head">
                   <div>
-                    <h2>自动化与网络</h2>
+                    <h2>自动化</h2>
                   </div>
                 </div>
 
                 <div class="settings-section">
                   <label class="field">
-                    <span class="field-label">自动刷新间隔（秒）</span>
+                    <span class="field-label">自动刷新（秒）</span>
                     <input id="refreshIntervalInput" class="input" type="number" min="0" step="1" value="0" />
-                    <span class="field-note">填 0 表示关闭。需要盯着额度变化时再打开就够了。</span>
+                    <span class="field-note">0 关闭</span>
                   </label>
 
                   <label class="toggle">
                     <input id="autoApplyToggle" type="checkbox" />
                     <span>
-                      <strong>刷新后自动应用推荐顺序</strong>
-                      <span class="field-note">只有推荐顺序和当前顺序不一致时才会自动调整。</span>
+                      <strong>自动应用推荐</strong>
+                      <span class="field-note">顺序变化时才调整</span>
                     </span>
                   </label>
                 </div>
 
                 <div class="settings-section">
                   <label class="field">
-                    <span class="field-label">额度请求代理 URL</span>
+                    <span class="field-label">代理 URL</span>
                     <input id="usageProxyUrlInput" class="input" type="text" value="" placeholder="http://127.0.0.1:7890" />
-                    <span class="field-note">不填就沿用你当前环境里的代理设置。</span>
+                    <span class="field-note">留空则沿用系统代理</span>
                   </label>
 
                   <label class="toggle">
                     <input id="usageProxyToggle" type="checkbox" />
                     <span>
-                      <strong>获取额度时通过代理</strong>
-                      <span class="field-note">只影响额度查询，不影响本地账号数据和设置。</span>
+                      <strong>查询额度时使用代理</strong>
                     </span>
                   </label>
                 </div>
@@ -1712,7 +1775,7 @@ export function renderHtml() {
               <section class="card panel">
                 <div class="panel-head">
                   <div>
-                    <h2>当前连接</h2>
+                    <h2>连接</h2>
                   </div>
                 </div>
                 <div class="snapshot-grid">
@@ -1747,7 +1810,7 @@ export function renderHtml() {
           <div>
             <div class="modal-eyebrow">New Account</div>
             <h2 id="addModalTitle" class="modal-title">新增 openai-codex 账号</h2>
-            <p class="modal-copy">前缀固定，只需要填写账号后缀。提交后会直接开始这个账号的登录流程。</p>
+            <p class="modal-copy">填写后缀后开始登录。</p>
           </div>
           <button id="addModalCloseButton" class="icon-button" type="button" aria-label="关闭">×</button>
         </div>
@@ -1765,14 +1828,14 @@ export function renderHtml() {
                 placeholder="work"
               />
             </div>
-            <span class="field-note">例如 <code>work</code>、<code>personal</code>、<code>team-a</code>。</span>
+            <span class="field-note">例如 <code>work</code></span>
           </label>
           <div class="modal-detail-card">
             <strong>将要创建</strong>
             <p><code id="addProfilePreview">openai-codex:<span>...</span></code></p>
           </div>
           <div id="addModalError" class="error-line" hidden></div>
-          <p class="modal-note">如果这个后缀已存在，会直接提示重复，不会覆盖已有账号。</p>
+          <p class="modal-note">重名时不会覆盖。</p>
           <div class="modal-actions">
             <button id="addModalCancelButton" class="button-secondary" type="button">取消</button>
             <button id="addModalSubmitButton" class="button-primary" type="submit">开始登录</button>
@@ -1802,12 +1865,12 @@ export function renderHtml() {
           <label id="renameField" class="field" for="renameProfileIdInput" hidden>
             <span class="field-label">新的账号名称</span>
             <input id="renameProfileIdInput" class="input" type="text" autocomplete="off" spellcheck="false" />
-            <span class="field-note">保存后，这个账号会统一使用新的名称。</span>
+            <span class="field-note">保存后立即生效</span>
           </label>
 
           <div id="deleteField" class="modal-detail-card" hidden>
             <strong>删除确认</strong>
-            <p>删除后，这个账号会从本地账号数据和配置中一起移除。</p>
+            <p>删除后会一起移除。</p>
             <p>这个操作不可撤销。</p>
           </div>
 
@@ -2259,7 +2322,7 @@ export function renderHtml() {
         manageModalTitle.textContent = "重命名账号";
         manageModalCopy.textContent = "修改这个账号的名称，现有登录信息会跟着一起更新。";
         manageProfileIdText.textContent = row.profileId;
-        manageProfileHint.textContent = row.email || row.displayLabel || "保存后会直接使用新的账号名称。";
+        manageProfileHint.textContent = row.email || row.displayLabel || "保存后生效";
         renameField.hidden = false;
         deleteField.hidden = true;
         renameProfileIdInput.value = row.profileId.replace(/:default$/, ":work");
@@ -2278,9 +2341,9 @@ export function renderHtml() {
         appState.manageRow = row;
         manageModalEyebrow.textContent = "Delete Profile";
         manageModalTitle.textContent = "删除账号";
-        manageModalCopy.textContent = "删除后，这个账号会从当前面板和本地配置里一起移除。";
+        manageModalCopy.textContent = "删除后会一起移除";
         manageProfileIdText.textContent = row.profileId;
-        manageProfileHint.textContent = row.email || row.displayLabel || "确认后将立即执行删除。";
+        manageProfileHint.textContent = row.email || row.displayLabel || "确认后删除";
         renameField.hidden = true;
         deleteField.hidden = false;
         manageModalSubmitButton.textContent = "确认删除";
@@ -2680,65 +2743,92 @@ export function renderHtml() {
           const card = document.createElement("article");
           const isTop = row.recommendedOrderIndex === 0;
           card.className = "profile-card" + (isTop ? " top" : "") + (row.error ? " problem" : "");
+          const secondaryRemaining = getRemainingPercent(row.secondary);
+          const primaryRemaining = getRemainingPercent(row.primary);
 
           const head = document.createElement("div");
           head.className = "profile-head";
+          const main = document.createElement("div");
+          main.className = "profile-main";
+          const topline = document.createElement("div");
+          topline.className = "profile-topline";
           const rank = document.createElement("div");
           rank.className = "rank-badge";
           rank.textContent = row.recommendedOrderIndex >= 0 ? "#" + String(row.recommendedOrderIndex + 1) : "--";
-          const main = document.createElement("div");
-          main.className = "profile-main";
-          const headCopy = document.createElement("div");
           const name = document.createElement("div");
           name.className = "profile-name";
           name.textContent = row.displayLabel;
-          const profileId = document.createElement("div");
-          profileId.className = "profile-id";
-          profileId.textContent = row.profileId;
-          headCopy.appendChild(name);
-          headCopy.appendChild(profileId);
-          main.appendChild(headCopy);
+          topline.appendChild(rank);
+          topline.appendChild(name);
+          main.appendChild(topline);
 
+          const subline = document.createElement("div");
+          subline.className = "profile-subline";
+          subline.textContent = row.profileId;
+          main.appendChild(subline);
+
+          const headerMeta = document.createElement("div");
+          headerMeta.className = "profile-header-meta";
           const leadTag = document.createElement("div");
-          leadTag.className = "meta-tag " + (isTop ? "ok" : "info");
-          leadTag.textContent = row.recommendedOrderIndex >= 0
-            ? (isTop ? "当前推荐首位" : "推荐第 " + String(row.recommendedOrderIndex + 1) + " 位")
-            : "等待排序";
+          leadTag.className = "meta-tag " + (isTop ? "ok" : row.error ? "danger" : "info");
+          leadTag.textContent = row.error
+            ? "异常"
+            : isTop
+              ? "推荐"
+              : row.currentOrderIndex === 0
+                ? "正在用"
+                : "可切换";
 
-          head.appendChild(rank);
+          const stateRow = document.createElement("div");
+          stateRow.className = "profile-state-row";
+          const dot = document.createElement("span");
+          dot.className = "state-dot " + getQuotaTone(secondaryRemaining);
+          const stateText = document.createElement("span");
+          stateText.textContent = secondaryRemaining == null
+            ? "7天未知"
+            : secondaryRemaining <= 0
+              ? "7天已耗尽"
+              : "7天可用";
+          stateRow.appendChild(dot);
+          stateRow.appendChild(stateText);
+
+          headerMeta.appendChild(leadTag);
+          headerMeta.appendChild(stateRow);
+
           head.appendChild(main);
-          head.appendChild(leadTag);
+          head.appendChild(headerMeta);
           card.appendChild(head);
 
-          const statusRow = document.createElement("div");
-          statusRow.className = "status-badge-row";
-          if (row.plan) statusRow.appendChild(createStatusBadge("套餐 " + row.plan));
-          if (row.currentOrderIndex === 0) statusRow.appendChild(createStatusBadge("正在使用", "ok"));
-          if (row.expiresAt) statusRow.appendChild(createStatusBadge("过期 " + formatTime(row.expiresAt), "warn"));
-          if (row.error) statusRow.appendChild(createStatusBadge("异常", "danger"));
-          card.appendChild(statusRow);
+          const mainMetric = renderMetric(row.secondary, "7 天额度", "primary-window profile-main-window");
+          card.appendChild(mainMetric);
 
-          const metrics = document.createElement("div");
-          metrics.className = "metrics-column";
-          metrics.appendChild(renderMetric(row.secondary, "7 天窗口", "primary-window"));
-          metrics.appendChild(renderMetric(row.primary, "5 小时窗口", "secondary-window"));
-          card.appendChild(metrics);
+          const secondaryRow = document.createElement("div");
+          secondaryRow.className = "profile-secondary-row";
+          const shortWindow = document.createElement("span");
+          shortWindow.textContent = primaryRemaining == null ? "5h --" : "5h " + primaryRemaining + "%";
+          secondaryRow.appendChild(shortWindow);
+          if (row.primary?.resetAt) {
+            const shortReset = document.createElement("span");
+            shortReset.textContent = formatCountdown(row.primary.resetAt).text.replace(/^倒计时 /, "");
+            secondaryRow.appendChild(shortReset);
+          }
+          if (row.plan) {
+            const plan = document.createElement("span");
+            plan.textContent = row.plan;
+            secondaryRow.appendChild(plan);
+          }
+          if (row.expiresAt) {
+            const expiry = document.createElement("span");
+            expiry.textContent = "到期 " + formatTime(row.expiresAt);
+            secondaryRow.appendChild(expiry);
+          }
+          card.appendChild(secondaryRow);
 
-          const side = document.createElement("div");
-          side.className = "profile-side";
-          const insight = document.createElement("div");
-          insight.className = "profile-insight";
-          const insightTitle = document.createElement("h3");
-          insightTitle.textContent = isTop ? "为什么先用它" : "账号状态";
-          const insightText = document.createElement("p");
-          insightText.textContent = buildProfileReason(row);
-          insight.appendChild(insightTitle);
-          insight.appendChild(insightText);
           if (row.error) {
             const errorText = document.createElement("div");
             errorText.className = "error-text";
             errorText.textContent = row.error;
-            insight.appendChild(errorText);
+            card.appendChild(errorText);
           }
 
           const actions = document.createElement("div");
@@ -2754,47 +2844,59 @@ export function renderHtml() {
             const others = appState.data.currentEffectiveOrder.filter((entry) => entry !== row.profileId);
             void applyCustomOrder([row.profileId, ...others]);
           });
+          actions.appendChild(pinButton);
+
+          const menu = document.createElement("details");
+          menu.className = "profile-menu";
+
+          const summary = document.createElement("summary");
+          summary.textContent = "···";
+          menu.appendChild(summary);
+
+          const menuList = document.createElement("div");
+          menuList.className = "profile-menu-list";
 
           const lastButton = document.createElement("button");
           lastButton.type = "button";
-          lastButton.className = "button-secondary";
+          lastButton.className = "profile-menu-button";
           lastButton.textContent = "末位";
           lastButton.disabled = appState.busy;
           lastButton.dataset.actionButton = "true";
           lastButton.addEventListener("click", () => {
+            menu.removeAttribute("open");
             const others = appState.data.currentEffectiveOrder.filter((entry) => entry !== row.profileId);
             void applyCustomOrder([...others, row.profileId]);
           });
 
           const renameButton = document.createElement("button");
           renameButton.type = "button";
-          renameButton.className = "button-secondary";
+          renameButton.className = "profile-menu-button";
           renameButton.textContent = "改名";
           renameButton.disabled = appState.busy;
           renameButton.dataset.actionButton = "true";
           renameButton.addEventListener("click", () => {
+            menu.removeAttribute("open");
             openRenameModal(row);
           });
 
           const deleteButton = document.createElement("button");
           deleteButton.type = "button";
-          deleteButton.className = "button-ghost";
+          deleteButton.className = "profile-menu-button danger";
           deleteButton.textContent = "删除";
           deleteButton.disabled = appState.busy;
           deleteButton.dataset.actionButton = "true";
           deleteButton.addEventListener("click", () => {
+            menu.removeAttribute("open");
             openDeleteModal(row);
           });
 
-          actions.appendChild(pinButton);
-          actions.appendChild(lastButton);
-          actions.appendChild(renameButton);
-          actions.appendChild(deleteButton);
+          menuList.appendChild(lastButton);
+          menuList.appendChild(renameButton);
+          menuList.appendChild(deleteButton);
+          menu.appendChild(menuList);
+          actions.appendChild(menu);
 
-          side.appendChild(insight);
-          side.appendChild(actions);
-
-          card.appendChild(side);
+          card.appendChild(actions);
           fragment.appendChild(card);
         }
 
