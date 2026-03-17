@@ -804,6 +804,10 @@ export function renderHtml() {
         animation: rise 460ms ease;
       }
 
+      .panel[data-tab-panel="accounts"] {
+        overflow: visible;
+      }
+
       .panel-head {
         display: flex;
         gap: 12px;
@@ -1138,6 +1142,12 @@ export function renderHtml() {
         font-size: 0.76rem;
       }
 
+      .profile-secondary-row .order-pill {
+        min-height: 24px;
+        padding: 4px 10px;
+        font-size: 0.74rem;
+      }
+
       .metric-card {
         padding: 14px 14px 12px;
         border-radius: var(--radius-md);
@@ -1308,6 +1318,16 @@ export function renderHtml() {
         border: 1px solid rgba(29, 29, 31, 0.06);
         background: rgba(255, 255, 255, 0.98);
         box-shadow: 0 16px 30px rgba(0, 0, 0, 0.08);
+      }
+
+      .profile-menu[data-vertical="up"] .profile-menu-list {
+        top: auto;
+        bottom: calc(100% + 8px);
+      }
+
+      .profile-menu[data-horizontal="left"] .profile-menu-list {
+        right: auto;
+        left: 0;
       }
 
       .profile-menu-button {
@@ -2020,6 +2040,43 @@ export function renderHtml() {
         });
       }
 
+      function closeAllProfileMenus(exceptMenu = null) {
+        document.querySelectorAll(".profile-menu[open]").forEach((menu) => {
+          if (menu !== exceptMenu) {
+            menu.removeAttribute("open");
+          }
+        });
+      }
+
+      function positionProfileMenu(menu, menuList) {
+        if (!(menu instanceof HTMLElement) || !(menuList instanceof HTMLElement)) return;
+
+        // Reset to the default direction before measuring, then flip only when space is not enough.
+        menu.dataset.vertical = "down";
+        menu.dataset.horizontal = "right";
+
+        const summary = menu.querySelector("summary");
+        if (!(summary instanceof HTMLElement)) return;
+
+        const summaryRect = summary.getBoundingClientRect();
+        const menuHeight = menuList.offsetHeight;
+        const menuWidth = menuList.offsetWidth;
+        const gap = 8;
+
+        const spaceBelow = window.innerHeight - summaryRect.bottom;
+        const spaceAbove = summaryRect.top;
+        const spaceRight = window.innerWidth - summaryRect.right;
+        const spaceLeft = summaryRect.left;
+
+        if (spaceBelow < menuHeight + gap && spaceAbove > spaceBelow) {
+          menu.dataset.vertical = "up";
+        }
+
+        if (spaceRight < menuWidth && spaceLeft > spaceRight) {
+          menu.dataset.horizontal = "left";
+        }
+      }
+
       function getRemainingPercent(windowData) {
         return typeof windowData?.remainingPercent === "number" && Number.isFinite(windowData.remainingPercent)
           ? Math.max(0, Math.min(100, windowData.remainingPercent))
@@ -2079,6 +2136,84 @@ export function renderHtml() {
         node.className = "status-badge" + (tone ? " " + tone : "");
         node.textContent = label;
         return node;
+      }
+
+      function createInfoPill(label, tone = "") {
+        const node = document.createElement("span");
+        node.className = "order-pill" + (tone ? " " + tone : "");
+        node.textContent = label;
+        return node;
+      }
+
+      function getQuotaBadgeTone(remaining) {
+        const tone = getQuotaTone(remaining);
+        if (tone === "high") return "ok";
+        if (tone === "medium") return "warn";
+        if (tone === "low") return "danger";
+        return "info";
+      }
+
+      function getProfileAvailability(row) {
+        const primaryRemaining = getRemainingPercent(row?.primary);
+        const secondaryRemaining = getRemainingPercent(row?.secondary);
+
+        if (row?.error) {
+          return {
+            leadLabel: "异常",
+            leadTone: "danger",
+            stateText: "额度异常",
+            stateTone: "low",
+          };
+        }
+
+        if (secondaryRemaining != null && secondaryRemaining <= 0) {
+          return {
+            leadLabel: "7天耗尽",
+            leadTone: "danger",
+            stateText: "7天已耗尽",
+            stateTone: "low",
+          };
+        }
+
+        if (primaryRemaining != null && primaryRemaining <= 0) {
+          return {
+            leadLabel: "5h耗尽",
+            leadTone: "danger",
+            stateText: row?.primary?.resetAt ? "等待 5h 重置" : "5h 已耗尽",
+            stateTone: "low",
+          };
+        }
+
+        if (secondaryRemaining == null && primaryRemaining == null) {
+          return {
+            leadLabel: "待确认",
+            leadTone: "warn",
+            stateText: "额度未知",
+            stateTone: "unknown",
+          };
+        }
+
+        if (row?.currentOrderIndex === 0) {
+          return {
+            leadLabel: "正在用",
+            leadTone: "ok",
+            stateText: "当前可用",
+            stateTone: getQuotaTone(primaryRemaining != null ? primaryRemaining : secondaryRemaining),
+          };
+        }
+
+        return {
+          leadLabel: "可切换",
+          leadTone: "info",
+          stateText: "可立即切换",
+          stateTone: getQuotaTone(
+            primaryRemaining != null && secondaryRemaining != null
+              ? Math.min(primaryRemaining, secondaryRemaining)
+              : primaryRemaining != null
+                ? primaryRemaining
+                : secondaryRemaining,
+          ),
+        };
       }
 
       function arraysEqual(left, right) {
@@ -2745,6 +2880,7 @@ export function renderHtml() {
           card.className = "profile-card" + (isTop ? " top" : "") + (row.error ? " problem" : "");
           const secondaryRemaining = getRemainingPercent(row.secondary);
           const primaryRemaining = getRemainingPercent(row.primary);
+          const availability = getProfileAvailability(row);
 
           const head = document.createElement("div");
           head.className = "profile-head";
@@ -2770,25 +2906,16 @@ export function renderHtml() {
           const headerMeta = document.createElement("div");
           headerMeta.className = "profile-header-meta";
           const leadTag = document.createElement("div");
-          leadTag.className = "meta-tag " + (isTop ? "ok" : row.error ? "danger" : "info");
-          leadTag.textContent = row.error
-            ? "异常"
-            : isTop
-              ? "推荐"
-              : row.currentOrderIndex === 0
-                ? "正在用"
-                : "可切换";
+          const leadTone = isTop && availability.leadLabel === "可切换" ? "ok" : availability.leadTone;
+          leadTag.className = "meta-tag " + leadTone;
+          leadTag.textContent = isTop && availability.leadLabel === "可切换" ? "推荐" : availability.leadLabel;
 
           const stateRow = document.createElement("div");
           stateRow.className = "profile-state-row";
           const dot = document.createElement("span");
-          dot.className = "state-dot " + getQuotaTone(secondaryRemaining);
+          dot.className = "state-dot " + availability.stateTone;
           const stateText = document.createElement("span");
-          stateText.textContent = secondaryRemaining == null
-            ? "7天未知"
-            : secondaryRemaining <= 0
-              ? "7天已耗尽"
-              : "7天可用";
+          stateText.textContent = availability.stateText;
           stateRow.appendChild(dot);
           stateRow.appendChild(stateText);
 
@@ -2804,12 +2931,20 @@ export function renderHtml() {
 
           const secondaryRow = document.createElement("div");
           secondaryRow.className = "profile-secondary-row";
-          const shortWindow = document.createElement("span");
-          shortWindow.textContent = primaryRemaining == null ? "5h --" : "5h " + primaryRemaining + "%";
+          const shortWindow = createInfoPill(
+            primaryRemaining == null
+              ? "5h 未知"
+              : primaryRemaining <= 0
+                ? "5h 已耗尽"
+                : "5h " + primaryRemaining + "%",
+            getQuotaBadgeTone(primaryRemaining),
+          );
           secondaryRow.appendChild(shortWindow);
           if (row.primary?.resetAt) {
-            const shortReset = document.createElement("span");
-            shortReset.textContent = formatCountdown(row.primary.resetAt).text.replace(/^倒计时 /, "");
+            const shortReset = createInfoPill(
+              formatCountdown(row.primary.resetAt).text.replace(/^倒计时 /, ""),
+              primaryRemaining != null && primaryRemaining <= 0 ? "danger" : "info",
+            );
             secondaryRow.appendChild(shortReset);
           }
           if (row.plan) {
@@ -2848,6 +2983,8 @@ export function renderHtml() {
 
           const menu = document.createElement("details");
           menu.className = "profile-menu";
+          menu.dataset.vertical = "down";
+          menu.dataset.horizontal = "right";
 
           const summary = document.createElement("summary");
           summary.textContent = "···";
@@ -2894,6 +3031,13 @@ export function renderHtml() {
           menuList.appendChild(renameButton);
           menuList.appendChild(deleteButton);
           menu.appendChild(menuList);
+          menu.addEventListener("toggle", () => {
+            if (!menu.open) return;
+            closeAllProfileMenus(menu);
+            window.requestAnimationFrame(() => {
+              positionProfileMenu(menu, menuList);
+            });
+          });
           actions.appendChild(menu);
 
           card.appendChild(actions);
@@ -3225,8 +3369,16 @@ export function renderHtml() {
         void submitManageModal();
       });
 
+      document.addEventListener("click", (event) => {
+        if (event.target instanceof Element && event.target.closest(".profile-menu")) {
+          return;
+        }
+        closeAllProfileMenus();
+      });
+
       document.addEventListener("keydown", (event) => {
         if (event.key !== "Escape") return;
+        closeAllProfileMenus();
         if (!manageModal.hidden) {
           closeManageModal();
           return;
