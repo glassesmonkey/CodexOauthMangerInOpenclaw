@@ -699,6 +699,101 @@ export function renderHtml() {
         background: linear-gradient(180deg, rgba(255, 248, 247, 0.98), rgba(255, 242, 241, 0.92));
       }
 
+      .login-alert-card {
+        align-items: stretch;
+        min-width: min(540px, calc(100vw - 40px));
+        padding: 16px;
+        border-radius: 22px;
+      }
+
+      .login-alert-shell {
+        display: grid;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .login-alert-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .login-alert-status {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 0 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.7);
+        border: 1px solid rgba(29, 29, 31, 0.08);
+        color: var(--text);
+        font-size: 0.75rem;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .login-alert-copy {
+        display: grid;
+        gap: 6px;
+      }
+
+      .login-alert-copy p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.84rem;
+        line-height: 1.5;
+      }
+
+      .login-alert-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .login-alert-manual {
+        display: grid;
+        gap: 10px;
+        padding-top: 2px;
+      }
+
+      .login-alert-manual-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .login-alert-manual-top strong {
+        font-size: 0.86rem;
+      }
+
+      .login-alert-note {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.78rem;
+        line-height: 1.45;
+      }
+
+      .login-alert-form {
+        display: grid;
+        gap: 10px;
+      }
+
+      .login-alert-form-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .login-alert-form-row .input {
+        flex: 1 1 320px;
+      }
+
+      .login-alert-form-row .button-primary {
+        min-width: 148px;
+      }
+
       .alert-title { display: contents; }
 
       .alert-icon {
@@ -1913,7 +2008,10 @@ export function renderHtml() {
         loginTaskId: null,
         loginTask: null,
         popup: null,
-        manualPromptShown: false,
+        manualCodeDraft: "",
+        manualCodeError: "",
+        manualCodeSubmitting: false,
+        loginTaskRenderKey: "",
         refreshTimer: null,
         refreshIntervalSeconds: 0,
         autoApplyRecommended: false,
@@ -2762,12 +2860,14 @@ export function renderHtml() {
 
       function humanizeLoginStatus(status) {
         switch (status) {
-          case "pending":
-            return "等待开始";
-          case "authorizing":
-            return "等待浏览器确认";
-          case "polling":
-            return "正在等待登录完成";
+          case "starting":
+            return "正在启动";
+          case "awaiting_auth":
+            return "等待浏览器回调";
+          case "awaiting_manual_code":
+            return "等待手动回调";
+          case "saving":
+            return "正在保存账号";
           case "completed":
             return "登录完成";
           case "failed":
@@ -2775,6 +2875,24 @@ export function renderHtml() {
           default:
             return status || "未知";
         }
+      }
+
+      function buildLoginTaskRenderKey(task) {
+        if (!task) {
+          return "";
+        }
+        return JSON.stringify({
+          taskId: task.taskId,
+          status: task.status,
+          authUrl: task.authUrl,
+          instructions: task.instructions,
+          promptMessage: task.promptMessage,
+          manualEntryAvailable: Boolean(task.manualEntryAvailable),
+          manualEntryRequired: Boolean(task.manualEntryRequired),
+          manualCodeSubmitted: Boolean(task.manualCodeSubmitted),
+          manualHint: task.manualHint,
+          error: task.error,
+        });
       }
 
       function createAlertCard(title, tone, items) {
@@ -2804,18 +2922,163 @@ export function renderHtml() {
         return card;
       }
 
+      function createLoginAlertCard(task) {
+        const tone = task.status === "failed" ? "danger" : task.status === "completed" ? "ok" : "info";
+        const card = document.createElement("section");
+        card.className = "alert-card login-alert-card " + tone;
+
+        const shell = document.createElement("div");
+        shell.className = "login-alert-shell";
+
+        const head = document.createElement("div");
+        head.className = "login-alert-head";
+        const titleRow = document.createElement("div");
+        titleRow.className = "alert-title";
+        const icon = document.createElement("span");
+        icon.className = "alert-icon";
+        icon.textContent = tone === "danger" ? "×" : tone === "ok" ? "✓" : "i";
+        const heading = document.createElement("h3");
+        heading.textContent = "登录";
+        titleRow.appendChild(icon);
+        titleRow.appendChild(heading);
+
+        const status = document.createElement("div");
+        status.className = "login-alert-status";
+        status.textContent = humanizeLoginStatus(task.status);
+
+        head.appendChild(titleRow);
+        head.appendChild(status);
+        shell.appendChild(head);
+
+        const copy = document.createElement("div");
+        copy.className = "login-alert-copy";
+        const primary = document.createElement("p");
+        primary.textContent = task.instructions || task.error || "OAuth 登录进行中";
+        copy.appendChild(primary);
+        if (task.manualHint) {
+          const secondary = document.createElement("p");
+          secondary.textContent = task.manualHint;
+          copy.appendChild(secondary);
+        }
+        shell.appendChild(copy);
+
+        if ((task.status === "awaiting_auth" || task.status === "awaiting_manual_code") && task.authUrl) {
+          const actions = document.createElement("div");
+          actions.className = "login-alert-actions";
+          const openButton = document.createElement("button");
+          openButton.type = "button";
+          openButton.className = "button-secondary";
+          openButton.textContent = "打开授权页";
+          openButton.addEventListener("click", () => {
+            if (appState.popup && !appState.popup.closed) {
+              try {
+                appState.popup.focus();
+              } catch {
+                // Ignore focus errors from popup blockers.
+              }
+            }
+            const popup = window.open(task.authUrl, "_blank");
+            if (popup) {
+              appState.popup = popup;
+            }
+          });
+          actions.appendChild(openButton);
+          shell.appendChild(actions);
+        }
+
+        if (task.manualEntryAvailable) {
+          const manual = document.createElement("div");
+          manual.className = "login-alert-manual";
+
+          const manualTop = document.createElement("div");
+          manualTop.className = "login-alert-manual-top";
+          const manualTitle = document.createElement("strong");
+          manualTitle.textContent = task.manualEntryRequired ? "手动回调必填" : "手动回调兜底";
+          manualTop.appendChild(manualTitle);
+          manual.appendChild(manualTop);
+
+          const note = document.createElement("p");
+          note.className = "login-alert-note";
+          note.textContent = task.manualEntryRequired
+            ? "自动回调没有完成。把浏览器跳回的 localhost 链接整条粘过来，或者只粘贴 code。"
+            : "如果浏览器回调没被捕获，可以提前把 localhost 回调链接粘进来备用。";
+          manual.appendChild(note);
+
+          const form = document.createElement("div");
+          form.className = "login-alert-form";
+          const row = document.createElement("div");
+          row.className = "login-alert-form-row";
+
+          const input = document.createElement("input");
+          input.className = "input";
+          input.type = "text";
+          input.autocomplete = "off";
+          input.spellcheck = false;
+          input.placeholder = "粘贴 http://localhost:1455/auth/callback?... 或授权 code";
+          input.value = appState.manualCodeDraft;
+
+          const submit = document.createElement("button");
+          submit.type = "button";
+          submit.className = "button-primary";
+          submit.textContent = appState.manualCodeSubmitting ? "提交中..." : "提交回调链接";
+          submit.disabled = appState.manualCodeSubmitting || !input.value.trim() || !appState.loginTaskId;
+
+          input.addEventListener("input", () => {
+            appState.manualCodeDraft = input.value;
+            if (appState.manualCodeError) {
+              appState.manualCodeError = "";
+              errorLine.hidden = true;
+              errorLine.textContent = "";
+            }
+            submit.disabled = appState.manualCodeSubmitting || !input.value.trim() || !appState.loginTaskId;
+          });
+
+          input.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              if (!submit.disabled) {
+                void submitManualCodeEntry();
+              }
+            }
+          });
+
+          submit.addEventListener("click", () => {
+            void submitManualCodeEntry();
+          });
+
+          row.appendChild(input);
+          row.appendChild(submit);
+          form.appendChild(row);
+
+          const errorLine = document.createElement("div");
+          errorLine.className = "error-line";
+          errorLine.hidden = !appState.manualCodeError;
+          errorLine.textContent = appState.manualCodeError;
+          form.appendChild(errorLine);
+
+          if (task.manualCodeSubmitted && !appState.manualCodeError) {
+            const submitted = document.createElement("p");
+            submitted.className = "login-alert-note";
+            submitted.textContent = task.manualEntryRequired
+              ? "手动回调已提交，正在继续登录。"
+              : "手动回调已保存，自动回调失败时会自动使用。";
+            form.appendChild(submitted);
+          }
+
+          manual.appendChild(form);
+          shell.appendChild(manual);
+        }
+
+        card.appendChild(shell);
+        return card;
+      }
+
       function renderAlerts(data) {
         alertsGrid.innerHTML = "";
         const cards = [];
 
         if (appState.loginTask) {
-          cards.push(
-            createAlertCard(
-              "登录",
-              appState.loginTask.status === "failed" ? "danger" : "info",
-              [humanizeLoginStatus(appState.loginTask.status)],
-            ),
-          );
+          cards.push(createLoginAlertCard(appState.loginTask));
         }
 
         if (data?.warnings?.length) {
@@ -3145,9 +3408,47 @@ export function renderHtml() {
         }
       }
 
-      function renderLoginTask(task) {
+      function renderLoginTask(task, force = false) {
         appState.loginTask = task;
+        const nextKey = buildLoginTaskRenderKey(task);
+        if (!force && nextKey === appState.loginTaskRenderKey) {
+          return;
+        }
+        appState.loginTaskRenderKey = nextKey;
         renderAlerts(appState.data);
+      }
+
+      async function submitManualCodeEntry() {
+        if (!appState.loginTaskId) {
+          return;
+        }
+
+        const taskId = appState.loginTaskId;
+        const code = appState.manualCodeDraft.trim();
+        if (!code) {
+          appState.manualCodeError = "请粘贴 localhost 回调链接或授权 code。";
+          renderLoginTask(appState.loginTask, true);
+          return;
+        }
+
+        appState.manualCodeSubmitting = true;
+        appState.manualCodeError = "";
+        renderLoginTask(appState.loginTask, true);
+
+        try {
+          const task = await postJson("/api/login/manual-code", { taskId, code });
+          appState.manualCodeDraft = "";
+          appState.manualCodeSubmitting = false;
+          renderLoginTask(task, true);
+          setFlash(
+            task.manualEntryRequired ? "手动回调已提交，正在继续登录..." : "手动回调已保存，自动回调失败时会自动使用。",
+            "info",
+          );
+        } catch (error) {
+          appState.manualCodeSubmitting = false;
+          appState.manualCodeError = String(error instanceof Error ? error.message : error);
+          renderLoginTask(appState.loginTask, true);
+        }
       }
 
       async function pollLogin(taskId) {
@@ -3167,18 +3468,12 @@ export function renderHtml() {
             renderLoginTask(task);
             maybeNavigatePopup(task.authUrl);
 
-            if (task.status === "awaiting_manual_code" && !appState.manualPromptShown) {
-              appState.manualPromptShown = true;
-              const code = window.prompt(task.promptMessage || "Paste authorization code or redirect URL");
-              if (code && code.trim()) {
-                await postJson("/api/login/manual-code", { taskId, code });
-              }
-            }
-
             if (task.status === "completed") {
               appState.loginTaskId = null;
               appState.loginTask = task;
-              appState.manualPromptShown = false;
+              appState.manualCodeDraft = "";
+              appState.manualCodeError = "";
+              appState.manualCodeSubmitting = false;
               if (appState.popup && !appState.popup.closed) {
                 appState.popup.close();
               }
@@ -3191,7 +3486,8 @@ export function renderHtml() {
 
             if (task.status === "failed") {
               appState.loginTaskId = null;
-              appState.manualPromptShown = false;
+              appState.manualCodeError = "";
+              appState.manualCodeSubmitting = false;
               if (appState.popup && !appState.popup.closed) {
                 appState.popup.close();
               }
@@ -3205,7 +3501,7 @@ export function renderHtml() {
           }
         } catch (error) {
           appState.loginTaskId = null;
-          appState.manualPromptShown = false;
+          appState.manualCodeSubmitting = false;
           syncControlState();
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }
@@ -3230,7 +3526,10 @@ export function renderHtml() {
           appState.popup.close();
         }
         appState.popup = window.open("about:blank", "_blank");
-        appState.manualPromptShown = false;
+        appState.manualCodeDraft = "";
+        appState.manualCodeError = "";
+        appState.manualCodeSubmitting = false;
+        appState.loginTaskRenderKey = "";
         setBusy(true, "正在启动 OAuth 登录...", "info");
 
         try {

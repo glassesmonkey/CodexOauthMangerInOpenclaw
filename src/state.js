@@ -13,7 +13,7 @@ import {
   writeAuthStore,
 } from "./auth-store.js";
 import { fetchCodexUsage } from "./codex-api.js";
-import { loginWithCodex, resolveCredentialToken } from "./codex-auth.js";
+import { loginWithCodex, normalizeManualAuthorizationInput, resolveCredentialToken } from "./codex-auth.js";
 import {
   deleteProfileFromConfig,
   getConfigCodexOrder,
@@ -267,11 +267,33 @@ export async function saveLoggedInProfile(options, profileId, credentials) {
 function createDeferred() {
   let resolve;
   let reject;
+  let settled = false;
   const promise = new Promise((nextResolve, nextReject) => {
-    resolve = nextResolve;
-    reject = nextReject;
+    resolve = (value) => {
+      if (settled) {
+        return false;
+      }
+      settled = true;
+      nextResolve(value);
+      return true;
+    };
+    reject = (error) => {
+      if (settled) {
+        return false;
+      }
+      settled = true;
+      nextReject(error);
+      return true;
+    };
   });
-  return { promise, resolve, reject };
+  return {
+    promise,
+    resolve,
+    reject,
+    isSettled() {
+      return settled;
+    },
+  };
 }
 
 function sleep(ms) {
@@ -351,6 +373,10 @@ export class LoginManager {
       authUrl: task.authUrl || null,
       instructions: task.instructions || null,
       promptMessage: task.promptMessage || null,
+      manualEntryAvailable: task.status === "awaiting_auth" || task.status === "awaiting_manual_code",
+      manualEntryRequired: task.status === "awaiting_manual_code",
+      manualCodeSubmitted: task.manualCodeSubmitted,
+      manualHint: task.manualHint || null,
       error: task.error || null,
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,
@@ -369,10 +395,13 @@ export class LoginManager {
       authUrl: null,
       instructions: null,
       promptMessage: null,
+      manualHint: "Paste the full localhost callback URL or just the authorization code. If browser callback succeeds, you can ignore this.",
       error: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       manualCode: createDeferred(),
+      pendingManualCode: null,
+      manualCodeSubmitted: false,
     };
     this.tasks.set(task.id, task);
 
@@ -385,11 +414,23 @@ export class LoginManager {
     if (!task) {
       throw new Error("Login task not found.");
     }
-    if (!code || !code.trim()) {
-      throw new Error("Manual code cannot be empty.");
+    if (task.status === "completed" || task.status === "failed") {
+      throw new Error("Login task is no longer accepting manual code.");
     }
+    if (task.manualCode.isSettled()) {
+      throw new Error("Manual code was already submitted for this login.");
+    }
+
+    const normalized = normalizeManualAuthorizationInput(code);
+    task.pendingManualCode = normalized;
+    task.manualCodeSubmitted = true;
+    task.manualHint = task.status === "awaiting_manual_code"
+      ? "Manual callback received. Waiting to finish OAuth login."
+      : "Manual callback saved. It will be used automatically if browser callback does not complete.";
     task.updatedAt = Date.now();
-    task.manualCode.resolve(code.trim());
+    if (task.status === "awaiting_manual_code") {
+      task.manualCode.resolve(task.pendingManualCode);
+    }
     return this.getTask(taskId);
   }
 
@@ -409,21 +450,37 @@ export class LoginManager {
           task.status = "awaiting_auth";
           task.authUrl = url;
           task.instructions = instructions || "A browser window should open. Complete login to finish.";
+          task.promptMessage = null;
+          task.manualHint = task.manualCodeSubmitted
+            ? "Manual callback saved. It will be used automatically if browser callback does not complete."
+            : "You can paste the full localhost callback URL or just the authorization code if auto-detection misses it.";
           task.updatedAt = Date.now();
         },
         waitForManualCode: async (message) => {
           task.status = "awaiting_manual_code";
           task.promptMessage = message;
+          task.manualHint = "Automatic callback did not finish. Paste the full localhost callback URL or just the authorization code.";
           task.updatedAt = Date.now();
+          if (task.pendingManualCode) {
+            task.manualCode.resolve(task.pendingManualCode);
+          }
           return await task.manualCode.promise;
+        },
+        onManualCodeRequested: async (message) => {
+          task.status = "awaiting_manual_code";
+          task.promptMessage = message;
+          task.manualHint = "Automatic callback did not finish. Paste the full localhost callback URL or just the authorization code.";
+          task.updatedAt = Date.now();
         },
         proxyConfig: options.usageProxy,
       });
 
       task.status = "saving";
+      task.manualHint = "Authorization code accepted. Saving the new profile.";
       task.updatedAt = Date.now();
       await this.saveProfile(options, task.profileId, credentials);
       task.status = "completed";
+      task.manualHint = "OAuth login completed.";
       task.updatedAt = Date.now();
     } catch (error) {
       task.status = "failed";

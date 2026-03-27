@@ -140,7 +140,13 @@ export async function startDashboardServer(options = {}) {
         const body = await readBody(request);
         const taskId = typeof body.taskId === "string" ? body.taskId.trim() : "";
         const code = typeof body.code === "string" ? body.code.trim() : "";
-        sendJson(response, 200, loginManager.submitManualCode(taskId, code));
+        try {
+          sendJson(response, 200, loginManager.submitManualCode(taskId, code));
+        } catch (error) {
+          sendJson(response, 400, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
         return;
       }
 

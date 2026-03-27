@@ -555,6 +555,7 @@ test("loginWithCodex routes token exchange through configured proxy", async () =
         proxyConfig: { enabled: true, url: "" },
         onAuth() {},
         waitForManualCode: async () => "code",
+        onManualCodeRequested() {},
         loginImpl: async () => {
           try {
             await fetch("https://auth.openai.com/oauth/token");
@@ -597,6 +598,74 @@ test("waitForOpenAICallbackPort waits until the callback port is released", asyn
   }, 50);
 
   await waitPromise;
+});
+
+test("LoginManager stays in awaiting_auth until manual fallback is actually required", async () => {
+  let releaseFallback = () => {};
+  const manager = new LoginManager({
+    waitForCallbackPort: async () => {},
+    loginRunner: async ({ onAuth, waitForManualCode }) => {
+      onAuth({ url: "http://example.com/auth", instructions: "Open browser" });
+      await new Promise((resolve) => {
+        releaseFallback = resolve;
+      });
+      return {
+        access: await waitForManualCode("Paste code"),
+        refresh: "refresh-token",
+        expires: Date.now() + 60_000,
+        accountId: "account-id",
+      };
+    },
+    saveProfile: async () => {},
+  });
+
+  const task = manager.start({}, "openai-codex:manual-status");
+  const awaitingAuth = await waitForTaskStatus(manager, task.taskId, "awaiting_auth");
+
+  assert.equal(awaitingAuth.manualEntryAvailable, true);
+  assert.equal(awaitingAuth.manualEntryRequired, false);
+  assert.equal(awaitingAuth.manualCodeSubmitted, false);
+
+  releaseFallback();
+  const awaitingManual = await waitForTaskStatus(manager, task.taskId, "awaiting_manual_code");
+  assert.equal(awaitingManual.manualEntryRequired, true);
+
+  manager.submitManualCode(task.taskId, "manual-code");
+  await waitForTaskStatus(manager, task.taskId, "completed");
+});
+
+test("LoginManager reuses manual callback submitted before fallback is requested", async () => {
+  let releaseFallback = () => {};
+  const manager = new LoginManager({
+    waitForCallbackPort: async () => {},
+    loginRunner: async ({ onAuth, waitForManualCode }) => {
+      onAuth({ url: "http://example.com/auth" });
+      await new Promise((resolve) => {
+        releaseFallback = resolve;
+      });
+      const code = await waitForManualCode("Paste code");
+      return {
+        access: code,
+        refresh: "refresh-token",
+        expires: Date.now() + 60_000,
+        accountId: "account-id",
+      };
+    },
+    saveProfile: async () => {},
+  });
+
+  const task = manager.start({}, "openai-codex:preload-manual");
+  await waitForTaskStatus(manager, task.taskId, "awaiting_auth");
+
+  const submitted = manager.submitManualCode(
+    task.taskId,
+    "http://localhost:1455/auth/callback?code=early-code&state=abc",
+  );
+  assert.equal(submitted.manualCodeSubmitted, true);
+  assert.equal(submitted.manualEntryRequired, false);
+
+  releaseFallback();
+  await waitForTaskStatus(manager, task.taskId, "completed");
 });
 
 test("LoginManager serializes OAuth logins that share the same callback port", async () => {
@@ -655,6 +724,39 @@ test("LoginManager serializes OAuth logins that share the same callback port", a
     "manual:second-code",
     "save:openai-codex:second",
   ]);
+});
+
+test("submitManualCode rejects obviously invalid input without resolving the login", async () => {
+  const manager = new LoginManager({
+    waitForCallbackPort: async () => {},
+    loginRunner: async ({ onAuth, waitForManualCode }) => {
+      onAuth({ url: "http://example.com/auth" });
+      const code = await waitForManualCode("Paste code");
+      return {
+        access: code,
+        refresh: "refresh-token",
+        expires: Date.now() + 60_000,
+        accountId: "account-id",
+      };
+    },
+    saveProfile: async () => {},
+  });
+
+  const task = manager.start({}, "openai-codex:invalid-manual");
+  await waitForTaskStatus(manager, task.taskId, "awaiting_manual_code");
+
+  assert.throws(
+    () => manager.submitManualCode(task.taskId, "localhost callback copied from browser without code param"),
+    /full localhost callback URL or the authorization code/,
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const afterInvalid = manager.getTask(task.taskId);
+  assert.equal(afterInvalid?.status, "awaiting_manual_code");
+  assert.equal(afterInvalid?.manualCodeSubmitted, false);
+
+  manager.submitManualCode(task.taskId, "code=valid-code&state=abc");
+  await waitForTaskStatus(manager, task.taskId, "completed");
 });
 
 test("resolveCredentialToken routes refresh requests through configured proxy", async () => {

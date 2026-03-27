@@ -24,6 +24,59 @@ function enhanceOAuthError(error, proxyConfig) {
   return new Error(message + hint);
 }
 
+function parseManualAuthorizationInput(input) {
+  const value = typeof input === "string" ? input.trim() : "";
+  if (!value) {
+    return {};
+  }
+
+  try {
+    const url = new URL(value);
+    return {
+      code: url.searchParams.get("code") ?? undefined,
+      state: url.searchParams.get("state") ?? undefined,
+    };
+  } catch {
+    // Not a full URL, continue with text-only parsing.
+  }
+
+  if (value.includes("#")) {
+    const [code, state] = value.split("#", 2);
+    return {
+      code: code?.trim() || undefined,
+      state: state?.trim() || undefined,
+    };
+  }
+
+  if (value.includes("code=")) {
+    const params = new URLSearchParams(value);
+    return {
+      code: params.get("code") ?? undefined,
+      state: params.get("state") ?? undefined,
+    };
+  }
+
+  if (/\s/.test(value)) {
+    return {};
+  }
+
+  return { code: value };
+}
+
+export function normalizeManualAuthorizationInput(input) {
+  const value = typeof input === "string" ? input.trim() : "";
+  if (!value) {
+    throw new Error("Manual code cannot be empty.");
+  }
+
+  const parsed = parseManualAuthorizationInput(value);
+  if (!parsed.code || !parsed.code.trim()) {
+    throw new Error("Paste the full localhost callback URL or the authorization code.");
+  }
+
+  return value;
+}
+
 export async function resolveCredentialToken(credential, options = {}) {
   const refreshImpl = options.refreshImpl ?? refreshOpenAICodexToken;
   const proxyFetch = createUsageFetch(options.proxyConfig);
@@ -70,7 +123,13 @@ export async function resolveCredentialToken(credential, options = {}) {
   throw new Error(`Unsupported credential type: ${credential?.type ?? "unknown"}`);
 }
 
-export async function loginWithCodex({ onAuth, waitForManualCode, proxyConfig, loginImpl = loginOpenAICodex }) {
+export async function loginWithCodex({
+  onAuth,
+  waitForManualCode,
+  onManualCodeRequested,
+  proxyConfig,
+  loginImpl = loginOpenAICodex,
+}) {
   const proxyFetch = createUsageFetch(proxyConfig);
 
   try {
@@ -78,8 +137,11 @@ export async function loginWithCodex({ onAuth, waitForManualCode, proxyConfig, l
       await loginImpl({
         originator: "codex-auth-dashboard",
         onAuth,
-        onManualCodeInput: async () => await waitForManualCode("Paste the authorization code or full redirect URL:"),
-        onPrompt: async (prompt) => await waitForManualCode(prompt?.message || "Paste the authorization code or full redirect URL:"),
+        onPrompt: async (prompt) => {
+          const message = prompt?.message || "Paste the authorization code or full redirect URL:";
+          await onManualCodeRequested?.(message);
+          return await waitForManualCode(message);
+        },
       }),
     );
   } catch (error) {
