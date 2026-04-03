@@ -12,6 +12,7 @@ import { openBrowser, parseArgs } from "../src/index.js";
 import { buildConfigAudit, buildWarnings, recommendProfileOrder } from "../src/order.js";
 import { clearAutoAuthProfileOverrides, readSessionStore } from "../src/session-store.js";
 import { applyOrder, LoginManager, waitForOpenAICallbackPort } from "../src/state.js";
+import { renderHtml } from "../src/ui.js";
 import { createUsageFetch, resolveUsageProxyUrl } from "../src/usage-fetch.js";
 
 function createJwt(payload) {
@@ -475,6 +476,16 @@ test("parseArgs accepts explicit port override", () => {
 
   assert.equal(args.port, 3100);
   assert.equal(args.open, true);
+});
+
+test("renderHtml exposes accounts view toggle for quota and email suffix grouping", () => {
+  const html = renderHtml();
+
+  assert.match(html, /id="accountsViewQuota"/);
+  assert.match(html, /额度顺序/);
+  assert.match(html, /id="accountsViewGrouped"/);
+  assert.match(html, /邮箱后缀分组/);
+  assert.match(html, /codex-auth-dashboard\.accounts-view/);
 });
 
 test("buildWarnings flags config order mismatch as informational warning", () => {

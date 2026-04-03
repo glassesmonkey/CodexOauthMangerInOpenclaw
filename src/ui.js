@@ -919,6 +919,32 @@ export function renderHtml() {
         line-height: 1.45;
       }
 
+      .view-switch {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 6px;
+        border-radius: 999px;
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        background: rgba(242, 242, 247, 0.86);
+      }
+
+      .view-switch-button {
+        min-height: 34px;
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 0.8rem;
+        transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+      }
+
+      .view-switch-button.active {
+        background: rgba(255, 255, 255, 0.98);
+        color: var(--text);
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.06);
+      }
+
       .order-grid {
         display: grid;
         gap: 14px;
@@ -1118,6 +1144,46 @@ export function renderHtml() {
         display: grid;
         gap: 16px;
         grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .profile-group-list {
+        display: grid;
+        gap: 16px;
+      }
+
+      .profile-group {
+        padding: 18px;
+        border-radius: var(--radius-lg);
+        border: 1px solid rgba(29, 29, 31, 0.06);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 246, 249, 0.94));
+      }
+
+      .profile-group-head {
+        display: flex;
+        gap: 12px;
+        justify-content: space-between;
+        align-items: start;
+        margin-bottom: 14px;
+      }
+
+      .profile-group-title {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .profile-group-title strong {
+        font-family: var(--display);
+        font-size: 1rem;
+        font-weight: 600;
+      }
+
+      .profile-group-note {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 0.76rem;
+        line-height: 1.45;
       }
 
       .profile-card {
@@ -1688,6 +1754,19 @@ export function renderHtml() {
           height: 64px;
         }
 
+        .panel-head,
+        .profile-group-head {
+          flex-direction: column;
+        }
+
+        .view-switch {
+          width: 100%;
+        }
+
+        .view-switch-button {
+          flex: 1 1 0;
+        }
+
         .profile-id-input {
           grid-template-columns: 1fr;
         }
@@ -1822,6 +1901,22 @@ export function renderHtml() {
             <div class="panel-head">
               <div>
                 <h2>账号</h2>
+              </div>
+              <div class="view-switch" role="group" aria-label="账号展示方式">
+                <button
+                  id="accountsViewQuota"
+                  class="view-switch-button active"
+                  type="button"
+                  data-accounts-view="quota"
+                  aria-pressed="true"
+                >额度顺序</button>
+                <button
+                  id="accountsViewGrouped"
+                  class="view-switch-button"
+                  type="button"
+                  data-accounts-view="grouped"
+                  aria-pressed="false"
+                >邮箱后缀分组</button>
               </div>
             </div>
             <div id="profilesList" class="profile-list"></div>
@@ -2018,6 +2113,7 @@ export function renderHtml() {
         usageProxyEnabled: false,
         usageProxyUrl: "",
         activeTab: "accounts",
+        accountsView: "quota",
         manageMode: null,
         manageRow: null,
       };
@@ -2027,6 +2123,7 @@ export function renderHtml() {
       const USAGE_PROXY_ENABLED_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-enabled";
       const USAGE_PROXY_URL_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-url";
       const ACTIVE_TAB_STORAGE_KEY = "codex-auth-dashboard.active-tab";
+      const ACCOUNTS_VIEW_STORAGE_KEY = "codex-auth-dashboard.accounts-view";
       const PROFILE_ID_PREFIX = "openai-codex:";
 
       const flashBanner = document.getElementById("flashBanner");
@@ -2064,6 +2161,8 @@ export function renderHtml() {
       const recommendedOrder = document.getElementById("recommendedOrder");
       const profilesList = document.getElementById("profilesList");
       const emptyState = document.getElementById("emptyState");
+      const accountsViewQuotaButton = document.getElementById("accountsViewQuota");
+      const accountsViewGroupedButton = document.getElementById("accountsViewGrouped");
 
       const addModal = document.getElementById("addModal");
       const addModalForm = document.getElementById("addModalForm");
@@ -2348,6 +2447,7 @@ export function renderHtml() {
           window.localStorage.setItem(USAGE_PROXY_ENABLED_STORAGE_KEY, String(appState.usageProxyEnabled));
           window.localStorage.setItem(USAGE_PROXY_URL_STORAGE_KEY, appState.usageProxyUrl);
           window.localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, appState.activeTab);
+          window.localStorage.setItem(ACCOUNTS_VIEW_STORAGE_KEY, appState.accountsView);
         } catch {
           // Ignore localStorage failures in restricted browsers.
         }
@@ -2373,14 +2473,20 @@ export function renderHtml() {
           if (activeTab === "accounts" || activeTab === "order" || activeTab === "settings") {
             appState.activeTab = activeTab;
           }
+          const accountsView = window.localStorage.getItem(ACCOUNTS_VIEW_STORAGE_KEY);
+          if (accountsView === "quota" || accountsView === "grouped") {
+            appState.accountsView = accountsView;
+          }
         } catch {
           appState.refreshIntervalSeconds = 0;
           appState.autoApplyRecommended = false;
           appState.usageProxyEnabled = false;
           appState.usageProxyUrl = "";
           appState.activeTab = "accounts";
+          appState.accountsView = "quota";
         }
         syncAutomationControls();
+        syncAccountsViewControls();
       }
 
       function syncTabState() {
@@ -2399,6 +2505,33 @@ export function renderHtml() {
         appState.activeTab = tab;
         syncTabState();
         persistAutomationSettings();
+      }
+
+      function syncAccountsViewControls() {
+        const buttons = [
+          [accountsViewQuotaButton, "quota"],
+          [accountsViewGroupedButton, "grouped"],
+        ];
+        buttons.forEach(([button, view]) => {
+          const active = appState.accountsView === view;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", active ? "true" : "false");
+        });
+      }
+
+      function setAccountsView(view) {
+        if (view !== "quota" && view !== "grouped") {
+          return;
+        }
+        if (appState.accountsView === view) {
+          return;
+        }
+        appState.accountsView = view;
+        syncAccountsViewControls();
+        persistAutomationSettings();
+        if (appState.data) {
+          renderProfileCards(appState.data);
+        }
       }
 
       function scheduleAutoRefresh() {
@@ -3128,6 +3261,206 @@ export function renderHtml() {
         nextResetValue.textContent = nextReset ? formatCountdown(nextReset).text.replace(/^倒计时 /, "") : "未知";
       }
 
+      function resolveEmailSuffix(email) {
+        if (typeof email !== "string") {
+          return null;
+        }
+        const trimmed = email.trim();
+        const atIndex = trimmed.lastIndexOf("@");
+        if (atIndex < 0 || atIndex === trimmed.length - 1) {
+          return null;
+        }
+        const suffix = trimmed.slice(atIndex + 1).trim().toLowerCase();
+        return suffix || null;
+      }
+
+      function groupRowsByEmailSuffix(rows) {
+        const groups = new Map();
+        for (const row of rows) {
+          const suffix = resolveEmailSuffix(row.email);
+          const key = suffix || "__missing__";
+          if (!groups.has(key)) {
+            groups.set(key, {
+              key,
+              title: suffix ? "@" + suffix : "未识别邮箱后缀",
+              note: suffix ? "组内仍按额度推荐顺序排列" : "没有邮箱地址的账号会归到这里",
+              rows: [],
+            });
+          }
+          groups.get(key).rows.push(row);
+        }
+        return Array.from(groups.values());
+      }
+
+      function createProfileCard(row) {
+        const card = document.createElement("article");
+        const isTop = row.recommendedOrderIndex === 0;
+        card.className = "profile-card" + (isTop ? " top" : "") + (row.error ? " problem" : "");
+        const primaryRemaining = getRemainingPercent(row.primary);
+        const availability = getProfileAvailability(row);
+
+        const head = document.createElement("div");
+        head.className = "profile-head";
+        const main = document.createElement("div");
+        main.className = "profile-main";
+        const topline = document.createElement("div");
+        topline.className = "profile-topline";
+        const rank = document.createElement("div");
+        rank.className = "rank-badge";
+        rank.textContent = row.recommendedOrderIndex >= 0 ? "#" + String(row.recommendedOrderIndex + 1) : "--";
+        const name = document.createElement("div");
+        name.className = "profile-name";
+        name.textContent = row.displayLabel;
+        topline.appendChild(rank);
+        topline.appendChild(name);
+        main.appendChild(topline);
+
+        const subline = document.createElement("div");
+        subline.className = "profile-subline";
+        subline.textContent = row.profileId;
+        main.appendChild(subline);
+
+        const headerMeta = document.createElement("div");
+        headerMeta.className = "profile-header-meta";
+        const leadTag = document.createElement("div");
+        const leadTone = isTop && availability.leadLabel === "可切换" ? "ok" : availability.leadTone;
+        leadTag.className = "meta-tag " + leadTone;
+        leadTag.textContent = isTop && availability.leadLabel === "可切换" ? "推荐" : availability.leadLabel;
+
+        const stateRow = document.createElement("div");
+        stateRow.className = "profile-state-row";
+        const dot = document.createElement("span");
+        dot.className = "state-dot " + availability.stateTone;
+        const stateText = document.createElement("span");
+        stateText.textContent = availability.stateText;
+        stateRow.appendChild(dot);
+        stateRow.appendChild(stateText);
+
+        headerMeta.appendChild(leadTag);
+        headerMeta.appendChild(stateRow);
+
+        head.appendChild(main);
+        head.appendChild(headerMeta);
+        card.appendChild(head);
+
+        const mainMetric = renderMetric(row.secondary, "7 天额度", "primary-window profile-main-window");
+        card.appendChild(mainMetric);
+
+        const secondaryRow = document.createElement("div");
+        secondaryRow.className = "profile-secondary-row";
+        const shortWindow = createInfoPill(
+          primaryRemaining == null
+            ? "5h 未知"
+            : primaryRemaining <= 0
+              ? "5h 已耗尽"
+              : "5h " + primaryRemaining + "%",
+          getQuotaBadgeTone(primaryRemaining),
+        );
+        secondaryRow.appendChild(shortWindow);
+        if (row.primary?.resetAt) {
+          const shortReset = createInfoPill(
+            formatCountdown(row.primary.resetAt).text.replace(/^倒计时 /, ""),
+            primaryRemaining != null && primaryRemaining <= 0 ? "danger" : "info",
+          );
+          secondaryRow.appendChild(shortReset);
+        }
+        if (row.plan) {
+          const plan = document.createElement("span");
+          plan.textContent = row.plan;
+          secondaryRow.appendChild(plan);
+        }
+        if (row.expiresAt) {
+          const expiry = document.createElement("span");
+          expiry.textContent = "到期 " + formatTime(row.expiresAt);
+          secondaryRow.appendChild(expiry);
+        }
+        card.appendChild(secondaryRow);
+
+        if (row.error) {
+          const errorText = document.createElement("div");
+          errorText.className = "error-text";
+          errorText.textContent = row.error;
+          card.appendChild(errorText);
+        }
+
+        const actions = document.createElement("div");
+        actions.className = "profile-actions";
+
+        const pinButton = document.createElement("button");
+        pinButton.type = "button";
+        pinButton.className = isTop ? "button-secondary" : "button-primary";
+        pinButton.textContent = isTop ? "已置顶" : "置顶";
+        pinButton.disabled = isTop || appState.busy;
+        pinButton.dataset.actionButton = "true";
+        pinButton.addEventListener("click", () => {
+          const others = appState.data.currentEffectiveOrder.filter((entry) => entry !== row.profileId);
+          void applyCustomOrder([row.profileId, ...others]);
+        });
+        actions.appendChild(pinButton);
+
+        const menu = document.createElement("details");
+        menu.className = "profile-menu";
+        menu.dataset.vertical = "down";
+        menu.dataset.horizontal = "right";
+
+        const summary = document.createElement("summary");
+        summary.textContent = "···";
+        menu.appendChild(summary);
+
+        const menuList = document.createElement("div");
+        menuList.className = "profile-menu-list";
+
+        const lastButton = document.createElement("button");
+        lastButton.type = "button";
+        lastButton.className = "profile-menu-button";
+        lastButton.textContent = "末位";
+        lastButton.disabled = appState.busy;
+        lastButton.dataset.actionButton = "true";
+        lastButton.addEventListener("click", () => {
+          menu.removeAttribute("open");
+          const others = appState.data.currentEffectiveOrder.filter((entry) => entry !== row.profileId);
+          void applyCustomOrder([...others, row.profileId]);
+        });
+
+        const renameButton = document.createElement("button");
+        renameButton.type = "button";
+        renameButton.className = "profile-menu-button";
+        renameButton.textContent = "改名";
+        renameButton.disabled = appState.busy;
+        renameButton.dataset.actionButton = "true";
+        renameButton.addEventListener("click", () => {
+          menu.removeAttribute("open");
+          openRenameModal(row);
+        });
+
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "profile-menu-button danger";
+        deleteButton.textContent = "删除";
+        deleteButton.disabled = appState.busy;
+        deleteButton.dataset.actionButton = "true";
+        deleteButton.addEventListener("click", () => {
+          menu.removeAttribute("open");
+          openDeleteModal(row);
+        });
+
+        menuList.appendChild(lastButton);
+        menuList.appendChild(renameButton);
+        menuList.appendChild(deleteButton);
+        menu.appendChild(menuList);
+        menu.addEventListener("toggle", () => {
+          if (!menu.open) return;
+          closeAllProfileMenus(menu);
+          window.requestAnimationFrame(() => {
+            positionProfileMenu(menu, menuList);
+          });
+        });
+        actions.appendChild(menu);
+
+        card.appendChild(actions);
+        return card;
+      }
+
       function renderProfileCards(data) {
         profilesList.innerHTML = "";
         emptyState.hidden = data.rows.length > 0;
@@ -3135,178 +3468,58 @@ export function renderHtml() {
           return;
         }
 
-        const fragment = document.createDocumentFragment();
+        if (appState.accountsView === "grouped") {
+          profilesList.className = "profile-group-list";
+          const fragment = document.createDocumentFragment();
+          const groups = groupRowsByEmailSuffix(data.rows);
+          groups.forEach((group) => {
+            const section = document.createElement("section");
+            section.className = "profile-group";
 
-        for (const row of data.rows) {
-          const card = document.createElement("article");
-          const isTop = row.recommendedOrderIndex === 0;
-          card.className = "profile-card" + (isTop ? " top" : "") + (row.error ? " problem" : "");
-          const secondaryRemaining = getRemainingPercent(row.secondary);
-          const primaryRemaining = getRemainingPercent(row.primary);
-          const availability = getProfileAvailability(row);
+            const head = document.createElement("div");
+            head.className = "profile-group-head";
 
-          const head = document.createElement("div");
-          head.className = "profile-head";
-          const main = document.createElement("div");
-          main.className = "profile-main";
-          const topline = document.createElement("div");
-          topline.className = "profile-topline";
-          const rank = document.createElement("div");
-          rank.className = "rank-badge";
-          rank.textContent = row.recommendedOrderIndex >= 0 ? "#" + String(row.recommendedOrderIndex + 1) : "--";
-          const name = document.createElement("div");
-          name.className = "profile-name";
-          name.textContent = row.displayLabel;
-          topline.appendChild(rank);
-          topline.appendChild(name);
-          main.appendChild(topline);
+            const intro = document.createElement("div");
+            const title = document.createElement("div");
+            title.className = "profile-group-title";
+            const strong = document.createElement("strong");
+            strong.textContent = group.title;
+            title.appendChild(strong);
+            title.appendChild(createTag(group.rows.length + " 个账号", "info"));
+            intro.appendChild(title);
 
-          const subline = document.createElement("div");
-          subline.className = "profile-subline";
-          subline.textContent = row.profileId;
-          main.appendChild(subline);
+            const note = document.createElement("p");
+            note.className = "profile-group-note";
+            note.textContent = group.note;
+            intro.appendChild(note);
 
-          const headerMeta = document.createElement("div");
-          headerMeta.className = "profile-header-meta";
-          const leadTag = document.createElement("div");
-          const leadTone = isTop && availability.leadLabel === "可切换" ? "ok" : availability.leadTone;
-          leadTag.className = "meta-tag " + leadTone;
-          leadTag.textContent = isTop && availability.leadLabel === "可切换" ? "推荐" : availability.leadLabel;
+            const lead = group.rows[0];
+            const summary = document.createElement("div");
+            summary.className = "profile-group-title";
+            summary.appendChild(createInfoPill("最高优先级 #" + String(lead.recommendedOrderIndex + 1), "ok"));
 
-          const stateRow = document.createElement("div");
-          stateRow.className = "profile-state-row";
-          const dot = document.createElement("span");
-          dot.className = "state-dot " + availability.stateTone;
-          const stateText = document.createElement("span");
-          stateText.textContent = availability.stateText;
-          stateRow.appendChild(dot);
-          stateRow.appendChild(stateText);
+            head.appendChild(intro);
+            head.appendChild(summary);
+            section.appendChild(head);
 
-          headerMeta.appendChild(leadTag);
-          headerMeta.appendChild(stateRow);
-
-          head.appendChild(main);
-          head.appendChild(headerMeta);
-          card.appendChild(head);
-
-          const mainMetric = renderMetric(row.secondary, "7 天额度", "primary-window profile-main-window");
-          card.appendChild(mainMetric);
-
-          const secondaryRow = document.createElement("div");
-          secondaryRow.className = "profile-secondary-row";
-          const shortWindow = createInfoPill(
-            primaryRemaining == null
-              ? "5h 未知"
-              : primaryRemaining <= 0
-                ? "5h 已耗尽"
-                : "5h " + primaryRemaining + "%",
-            getQuotaBadgeTone(primaryRemaining),
-          );
-          secondaryRow.appendChild(shortWindow);
-          if (row.primary?.resetAt) {
-            const shortReset = createInfoPill(
-              formatCountdown(row.primary.resetAt).text.replace(/^倒计时 /, ""),
-              primaryRemaining != null && primaryRemaining <= 0 ? "danger" : "info",
-            );
-            secondaryRow.appendChild(shortReset);
-          }
-          if (row.plan) {
-            const plan = document.createElement("span");
-            plan.textContent = row.plan;
-            secondaryRow.appendChild(plan);
-          }
-          if (row.expiresAt) {
-            const expiry = document.createElement("span");
-            expiry.textContent = "到期 " + formatTime(row.expiresAt);
-            secondaryRow.appendChild(expiry);
-          }
-          card.appendChild(secondaryRow);
-
-          if (row.error) {
-            const errorText = document.createElement("div");
-            errorText.className = "error-text";
-            errorText.textContent = row.error;
-            card.appendChild(errorText);
-          }
-
-          const actions = document.createElement("div");
-          actions.className = "profile-actions";
-
-          const pinButton = document.createElement("button");
-          pinButton.type = "button";
-          pinButton.className = isTop ? "button-secondary" : "button-primary";
-          pinButton.textContent = isTop ? "已置顶" : "置顶";
-          pinButton.disabled = isTop || appState.busy;
-          pinButton.dataset.actionButton = "true";
-          pinButton.addEventListener("click", () => {
-            const others = appState.data.currentEffectiveOrder.filter((entry) => entry !== row.profileId);
-            void applyCustomOrder([row.profileId, ...others]);
-          });
-          actions.appendChild(pinButton);
-
-          const menu = document.createElement("details");
-          menu.className = "profile-menu";
-          menu.dataset.vertical = "down";
-          menu.dataset.horizontal = "right";
-
-          const summary = document.createElement("summary");
-          summary.textContent = "···";
-          menu.appendChild(summary);
-
-          const menuList = document.createElement("div");
-          menuList.className = "profile-menu-list";
-
-          const lastButton = document.createElement("button");
-          lastButton.type = "button";
-          lastButton.className = "profile-menu-button";
-          lastButton.textContent = "末位";
-          lastButton.disabled = appState.busy;
-          lastButton.dataset.actionButton = "true";
-          lastButton.addEventListener("click", () => {
-            menu.removeAttribute("open");
-            const others = appState.data.currentEffectiveOrder.filter((entry) => entry !== row.profileId);
-            void applyCustomOrder([...others, row.profileId]);
-          });
-
-          const renameButton = document.createElement("button");
-          renameButton.type = "button";
-          renameButton.className = "profile-menu-button";
-          renameButton.textContent = "改名";
-          renameButton.disabled = appState.busy;
-          renameButton.dataset.actionButton = "true";
-          renameButton.addEventListener("click", () => {
-            menu.removeAttribute("open");
-            openRenameModal(row);
-          });
-
-          const deleteButton = document.createElement("button");
-          deleteButton.type = "button";
-          deleteButton.className = "profile-menu-button danger";
-          deleteButton.textContent = "删除";
-          deleteButton.disabled = appState.busy;
-          deleteButton.dataset.actionButton = "true";
-          deleteButton.addEventListener("click", () => {
-            menu.removeAttribute("open");
-            openDeleteModal(row);
-          });
-
-          menuList.appendChild(lastButton);
-          menuList.appendChild(renameButton);
-          menuList.appendChild(deleteButton);
-          menu.appendChild(menuList);
-          menu.addEventListener("toggle", () => {
-            if (!menu.open) return;
-            closeAllProfileMenus(menu);
-            window.requestAnimationFrame(() => {
-              positionProfileMenu(menu, menuList);
+            const list = document.createElement("div");
+            list.className = "profile-list";
+            group.rows.forEach((row) => {
+              list.appendChild(createProfileCard(row));
             });
+            section.appendChild(list);
+            fragment.appendChild(section);
           });
-          actions.appendChild(menu);
 
-          card.appendChild(actions);
-          fragment.appendChild(card);
+          profilesList.appendChild(fragment);
+          return;
         }
 
+        profilesList.className = "profile-list";
+        const fragment = document.createDocumentFragment();
+        data.rows.forEach((row) => {
+          fragment.appendChild(createProfileCard(row));
+        });
         profilesList.appendChild(fragment);
       }
 
@@ -3321,6 +3534,7 @@ export function renderHtml() {
         renderOrder(effectiveOrder, data.currentEffectiveOrder, data.recommendedOrder[0]);
         renderOrder(recommendedOrder, data.recommendedOrder, data.recommendedOrder[0]);
         renderAlerts(data);
+        syncAccountsViewControls();
         renderProfileCards(data);
         syncTabState();
         syncControlState();
@@ -3702,6 +3916,12 @@ export function renderHtml() {
       });
       spotlightRefreshButton.addEventListener("click", () => {
         void refreshState();
+      });
+      accountsViewQuotaButton.addEventListener("click", () => {
+        setAccountsView("quota");
+      });
+      accountsViewGroupedButton.addEventListener("click", () => {
+        setAccountsView("grouped");
       });
 
       loadAutomationSettings();
