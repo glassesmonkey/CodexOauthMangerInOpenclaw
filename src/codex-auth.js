@@ -1,6 +1,9 @@
 import { loginOpenAICodex, refreshOpenAICodexToken } from "@mariozechner/pi-ai/oauth";
 import { createUsageFetch } from "./usage-fetch.js";
 
+const OPENAI_AUTH_CLAIM = "https://api.openai.com/auth";
+const OPENAI_PROFILE_CLAIM = "https://api.openai.com/profile";
+
 async function withTemporaryFetch(fetchImpl, action) {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = fetchImpl;
@@ -77,35 +80,99 @@ export function normalizeManualAuthorizationInput(input) {
   return value;
 }
 
+function readTrimmedString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function decodeJwtPayload(token) {
+  const value = readTrimmedString(token);
+  if (!value) {
+    return null;
+  }
+
+  const parts = value.split(".");
+  if (parts.length !== 3 || !parts[1]) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+export function extractOpenAIIdentityFromAccessToken(accessToken) {
+  const payload = decodeJwtPayload(accessToken);
+  const auth = payload?.[OPENAI_AUTH_CLAIM];
+  const profile = payload?.[OPENAI_PROFILE_CLAIM];
+
+  return {
+    accountId: readTrimmedString(auth?.chatgpt_account_id),
+    email: readTrimmedString(profile?.email),
+  };
+}
+
+export function enrichOpenAICodexCredential(credential) {
+  if (!credential || typeof credential !== "object") {
+    return credential;
+  }
+
+  const identity = extractOpenAIIdentityFromAccessToken(credential.access);
+  const storedAccountId = readTrimmedString(credential.accountId) || readTrimmedString(credential.metadata?.accountId);
+  const storedEmail = readTrimmedString(credential.email) || readTrimmedString(credential.metadata?.email);
+
+  let nextCredential = credential;
+
+  if (identity.accountId && !storedAccountId) {
+    nextCredential = {
+      ...nextCredential,
+      accountId: identity.accountId,
+    };
+  }
+
+  if (identity.email && !storedEmail) {
+    nextCredential = {
+      ...nextCredential,
+      email: identity.email,
+    };
+  }
+
+  return nextCredential;
+}
+
 export async function resolveCredentialToken(credential, options = {}) {
   const refreshImpl = options.refreshImpl ?? refreshOpenAICodexToken;
   const proxyFetch = createUsageFetch(options.proxyConfig);
 
   if (credential?.type === "oauth") {
-    if (typeof credential.access !== "string" || !credential.access.trim()) {
+    const enrichedCredential = enrichOpenAICodexCredential(credential);
+
+    if (typeof enrichedCredential.access !== "string" || !enrichedCredential.access.trim()) {
       throw new Error("OAuth profile is missing access token");
     }
-    const expiresAt = typeof credential.expires === "number" ? credential.expires : 0;
+    const expiresAt = typeof enrichedCredential.expires === "number" ? enrichedCredential.expires : 0;
     if (expiresAt > Date.now() + 30_000) {
       return {
-        token: credential.access,
-        credential,
-        refreshed: false,
+        token: enrichedCredential.access,
+        credential: enrichedCredential,
+        updated: enrichedCredential !== credential,
       };
     }
-    if (typeof credential.refresh !== "string" || !credential.refresh.trim()) {
+    if (typeof enrichedCredential.refresh !== "string" || !enrichedCredential.refresh.trim()) {
       throw new Error("OAuth profile is expired and missing refresh token");
     }
-    const refreshed = await withTemporaryFetch(proxyFetch, async () => await refreshImpl(credential.refresh));
+    const refreshed = await withTemporaryFetch(proxyFetch, async () => await refreshImpl(enrichedCredential.refresh));
+    const nextCredential = enrichOpenAICodexCredential({
+      ...enrichedCredential,
+      ...refreshed,
+      type: "oauth",
+      provider: "openai-codex",
+    });
     return {
-      token: refreshed.access,
-      credential: {
-        ...credential,
-        ...refreshed,
-        type: "oauth",
-        provider: "openai-codex",
-      },
-      refreshed: true,
+      token: nextCredential.access,
+      credential: nextCredential,
+      updated: true,
     };
   }
 

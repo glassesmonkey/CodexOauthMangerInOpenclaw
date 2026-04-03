@@ -14,6 +14,12 @@ import { clearAutoAuthProfileOverrides, readSessionStore } from "../src/session-
 import { applyOrder, LoginManager, waitForOpenAICallbackPort } from "../src/state.js";
 import { createUsageFetch, resolveUsageProxyUrl } from "../src/usage-fetch.js";
 
+function createJwt(payload) {
+  const encodedHeader = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${encodedHeader}.${encodedPayload}.signature`;
+}
+
 function restoreProxyEnv(originalEnv) {
   if (typeof originalEnv.HTTPS_PROXY === "string") {
     process.env.HTTPS_PROXY = originalEnv.HTTPS_PROXY;
@@ -797,4 +803,28 @@ test("resolveCredentialToken routes refresh requests through configured proxy", 
 
   assert.match(String(seenError?.message || ""), /Usage proxy is enabled/);
   assert.equal(globalThis.fetch, originalFetch);
+});
+
+test("resolveCredentialToken backfills email and accountId from access token claims", async () => {
+  const access = createJwt({
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: "account-from-token",
+    },
+    "https://api.openai.com/profile": {
+      email: "person@example.com",
+      email_verified: true,
+    },
+  });
+
+  const resolved = await resolveCredentialToken({
+    type: "oauth",
+    provider: "openai-codex",
+    access,
+    refresh: "refresh-token",
+    expires: Date.now() + 60_000,
+  });
+
+  assert.equal(resolved.updated, true);
+  assert.equal(resolved.credential.accountId, "account-from-token");
+  assert.equal(resolved.credential.email, "person@example.com");
 });

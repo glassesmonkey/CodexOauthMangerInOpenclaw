@@ -13,7 +13,12 @@ import {
   writeAuthStore,
 } from "./auth-store.js";
 import { fetchCodexUsage } from "./codex-api.js";
-import { loginWithCodex, normalizeManualAuthorizationInput, resolveCredentialToken } from "./codex-auth.js";
+import {
+  enrichOpenAICodexCredential,
+  loginWithCodex,
+  normalizeManualAuthorizationInput,
+  resolveCredentialToken,
+} from "./codex-auth.js";
 import {
   deleteProfileFromConfig,
   getConfigCodexOrder,
@@ -41,7 +46,13 @@ function resolveAccountId(credential) {
 }
 
 function resolveEmail(credential) {
-  return typeof credential?.email === "string" && credential.email.trim() ? credential.email.trim() : null;
+  if (typeof credential?.email === "string" && credential.email.trim()) {
+    return credential.email.trim();
+  }
+  if (typeof credential?.metadata?.email === "string" && credential.metadata.email.trim()) {
+    return credential.metadata.email.trim();
+  }
+  return null;
 }
 
 function resolveExpiresAt(credential) {
@@ -84,7 +95,7 @@ export async function loadDashboardState(options = {}, deps = {}) {
       const resolved = await resolveCredentialToken(entry.credential, {
         proxyConfig: deps.proxyConfig,
       });
-      if (resolved.refreshed) {
+      if (resolved.updated) {
         refreshedStore.profiles[entry.profileId] = resolved.credential;
         storeChanged = true;
       }
@@ -238,11 +249,11 @@ export async function deleteProfile(options, profileId, deps = {}) {
 }
 
 export async function saveLoggedInProfile(options, profileId, credentials) {
-  const nextCredential = {
+  const nextCredential = enrichOpenAICodexCredential({
     ...credentials,
     type: "oauth",
     provider: CODEX_PROVIDER,
-  };
+  });
 
   await updateAuthStore(options, (store) => {
     if (store.profiles[profileId]) {
