@@ -437,6 +437,23 @@ function exactRefreshMatch(left, right) {
   return Boolean(leftRefresh) && leftRefresh === rightRefresh;
 }
 
+function shouldMatchImportByAccountId(existingCredential, incomingCredential) {
+  const involvesCodex =
+    existingCredential?.provider === CODEX_PROVIDER
+    || incomingCredential?.provider === CODEX_PROVIDER;
+
+  if (!involvesCodex) {
+    return true;
+  }
+
+  const existingRefresh = typeof existingCredential?.refresh === "string" ? existingCredential.refresh.trim() : "";
+  const incomingRefresh = typeof incomingCredential?.refresh === "string" ? incomingCredential.refresh.trim() : "";
+
+  // Codex exports can contain multiple profiles under one accountId.
+  // When refresh tokens differ, each profile should stay independent.
+  return !existingRefresh && !incomingRefresh;
+}
+
 function resolveImportTargetProfileId(localStore, incomingProfileId, incomingCredential) {
   const profiles = Object.entries(localStore.profiles);
   const sameId = localStore.profiles[incomingProfileId];
@@ -444,8 +461,18 @@ function resolveImportTargetProfileId(localStore, incomingProfileId, incomingCre
     return incomingProfileId;
   }
 
+  const refreshMatches = profiles
+    .filter(([, credential]) => exactRefreshMatch(credential, incomingCredential))
+    .map(([profileId]) => profileId);
+  if (refreshMatches.length === 1) {
+    return refreshMatches[0];
+  }
+
   const accountMatches = profiles
     .filter(([, credential]) => {
+      if (!shouldMatchImportByAccountId(credential, incomingCredential)) {
+        return false;
+      }
       const existingAccountId = resolveAccountId(credential);
       const incomingAccountId = resolveAccountId(incomingCredential);
       return Boolean(existingAccountId) && Boolean(incomingAccountId) && existingAccountId === incomingAccountId;
@@ -453,13 +480,6 @@ function resolveImportTargetProfileId(localStore, incomingProfileId, incomingCre
     .map(([profileId]) => profileId);
   if (accountMatches.length === 1) {
     return accountMatches[0];
-  }
-
-  const refreshMatches = profiles
-    .filter(([, credential]) => exactRefreshMatch(credential, incomingCredential))
-    .map(([profileId]) => profileId);
-  if (refreshMatches.length === 1) {
-    return refreshMatches[0];
   }
 
   return null;

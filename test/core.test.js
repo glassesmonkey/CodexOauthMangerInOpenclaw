@@ -1257,6 +1257,143 @@ test("exportBundle and commitImportBundle round-trip encrypted local store", asy
   }
 });
 
+test("commitImportBundle keeps Codex profiles with same accountId but different refresh tokens", async () => {
+  const sourceStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-import-src-"));
+  const sourceLocalStateDir = path.join(sourceStateDir, ".local");
+  const sourceCodexAuthPath = path.join(sourceStateDir, ".codex", "auth.json");
+  writeLocalStore(sourceStateDir, {
+    profiles: {
+      "openai-codex:shared-a": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "shared-access-a",
+        refresh: "shared-refresh-a",
+        expires: Date.now() + 60_000,
+        accountId: "shared-account",
+        email: "shared-a@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "shared-id-a",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+      "openai-codex:shared-b": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "shared-access-b",
+        refresh: "shared-refresh-b",
+        expires: Date.now() + 60_000,
+        accountId: "shared-account",
+        email: "shared-b@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "shared-id-b",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+      "openai-codex:solo": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "solo-access",
+        refresh: "solo-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "solo-account",
+        email: "solo@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "solo-id",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+    },
+    order: {
+      "openai-codex": [
+        "openai-codex:shared-a",
+        "openai-codex:shared-b",
+        "openai-codex:solo",
+      ],
+    },
+  });
+
+  const usageFetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        rate_limit: {
+          primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+          secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+        },
+      };
+    },
+  });
+
+  try {
+    const exported = await exportBundle(
+      { stateDir: sourceStateDir, localStateDir: sourceLocalStateDir, agent: "main", codexAuthPath: sourceCodexAuthPath },
+      { passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    const targetStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-import-dst-"));
+    const targetLocalStateDir = path.join(targetStateDir, ".local");
+    const targetCodexAuthPath = path.join(targetStateDir, ".codex", "auth.json");
+    writeLocalStore(targetStateDir, {
+      profiles: {
+        "openai-codex:shared-a": {
+          type: "oauth",
+          provider: "openai-codex",
+          access: "old-shared-access-a",
+          refresh: "shared-refresh-a",
+          expires: Date.now() + 30_000,
+          accountId: "shared-account",
+          email: "old-shared-a@example.com",
+          codexAuth: {
+            authMode: "chatgpt",
+            idToken: "old-shared-id-a",
+            lastRefresh: "2026-04-01T10:00:00.000Z",
+          },
+        },
+      },
+      order: {
+        "openai-codex": ["openai-codex:shared-a"],
+      },
+    });
+
+    try {
+      const preview = await previewImportBundle(
+        { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+        { bundle: exported.bundle, passphrase: "secret-passphrase" },
+        { fetchImpl: usageFetch },
+      );
+
+      assert.equal(preview.preview.summary.update, 1);
+      assert.equal(preview.preview.summary.add, 2);
+
+      await commitImportBundle(
+        { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+        { bundle: exported.bundle, passphrase: "secret-passphrase" },
+        { fetchImpl: usageFetch },
+      );
+
+      const localStore = readAuthStore(path.join(targetLocalStateDir, "auth-store.json"));
+      assert.deepEqual(localStore.order["openai-codex"], [
+        "openai-codex:shared-a",
+        "openai-codex:shared-b",
+        "openai-codex:solo",
+      ]);
+      assert.equal(localStore.profiles["openai-codex:shared-a"].email, "shared-a@example.com");
+      assert.equal(localStore.profiles["openai-codex:shared-b"].email, "shared-b@example.com");
+      assert.equal(localStore.profiles["openai-codex:solo"].email, "solo@example.com");
+      assert.equal(localStore.profiles["openai-codex:shared-a"].refresh, "shared-refresh-a");
+      assert.equal(localStore.profiles["openai-codex:shared-b"].refresh, "shared-refresh-b");
+    } finally {
+      fs.rmSync(targetStateDir, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(sourceStateDir, { recursive: true, force: true });
+  }
+});
+
 test("resolveUsageProxyUrl prefers explicit URL and falls back to env", () => {
   assert.equal(
     resolveUsageProxyUrl(
