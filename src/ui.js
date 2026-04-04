@@ -4914,14 +4914,14 @@ export function renderHtml() {
             const fallbackMessage = okMessage === "额度自动刷新完成"
               ? "额度自动刷新后已应用推荐顺序"
               : "额度刷新后已应用推荐顺序";
-            setBusy(false, getApplyResultMessage(nextState.applyResult, fallbackMessage, {
+            setBusy(false, formatRefreshSuccessMessage(nextState, getApplyResultMessage(nextState.applyResult, fallbackMessage, {
               updatedMessage: okMessage === "额度自动刷新完成"
                 ? "额度自动刷新后已应用推荐顺序，Codex 当前账号已同步"
                 : "额度刷新后已应用推荐顺序，Codex 当前账号已同步",
               skippedPrefix: fallbackMessage,
-            }), "success");
+            })), "success");
           } else {
-            setBusy(false, okMessage, "success");
+            setBusy(false, formatRefreshSuccessMessage(data, okMessage), "success");
           }
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
@@ -4962,6 +4962,27 @@ export function renderHtml() {
         }
         const suffix = result.codexSelectionSkippedReason ? "，但 Codex 未同步：" + result.codexSelectionSkippedReason : "";
         return (options.skippedPrefix || fallbackMessage) + suffix;
+      }
+
+      function formatUsageRefreshMetrics(metrics) {
+        if (!metrics || !Number.isFinite(metrics.durationMs)) {
+          return "";
+        }
+
+        const seconds = (metrics.durationMs / 1000).toFixed(metrics.durationMs >= 10_000 ? 0 : 1);
+        const parts = [seconds + "s"];
+        if (Number.isFinite(metrics.remoteFetchCount)) {
+          parts.push("远端 " + metrics.remoteFetchCount);
+        }
+        if (Number.isFinite(metrics.cacheHitCount)) {
+          parts.push("缓存 " + metrics.cacheHitCount);
+        }
+        return parts.length > 0 ? "（" + parts.join(" / ") + "）" : "";
+      }
+
+      function formatRefreshSuccessMessage(data, message) {
+        const suffix = formatUsageRefreshMetrics(data?.usageRefreshMetrics);
+        return suffix ? message + suffix : message;
       }
 
       async function applyCustomOrder(order) {

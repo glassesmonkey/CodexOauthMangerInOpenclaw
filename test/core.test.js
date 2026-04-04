@@ -29,6 +29,7 @@ import {
 } from "../src/state.js";
 import { renderHtml } from "../src/ui.js";
 import { createUsageFetch, resolveUsageProxyUrl } from "../src/usage-fetch.js";
+import { clearUsageRefreshCache } from "../src/usage-refresh.js";
 
 function createJwt(payload) {
   const encodedHeader = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
@@ -66,6 +67,30 @@ function writeLocalStore(stateDir, store) {
   writeAuthStore(localAuthStorePath, store);
   return localAuthStorePath;
 }
+
+function createOauthProfile({
+  access,
+  refresh,
+  accountId,
+  email,
+  expires = Date.now() + 60_000,
+  codexAuth,
+}) {
+  return {
+    type: "oauth",
+    provider: "openai-codex",
+    access,
+    refresh,
+    expires,
+    accountId,
+    email,
+    ...(codexAuth ? { codexAuth } : {}),
+  };
+}
+
+test.beforeEach(() => {
+  clearUsageRefreshCache();
+});
 
 test("recommendProfileOrder prefers earlier secondary reset time", () => {
   const order = recommendProfileOrder([
@@ -914,6 +939,312 @@ test("loadDashboardState does not implicitly refresh OAuth credentials", async (
     assert.equal(refreshCalls, 0);
     const store = readAuthStore(path.join(localStateDir, "auth-store.json"));
     assert.equal(store.profiles["openai-codex:default"].access, "stale-access");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("loadDashboardState limits quota refresh concurrency to two remote requests", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-concurrency-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  let callCount = 0;
+  let activeRequests = 0;
+  let maxActiveRequests = 0;
+
+  writeLocalStore(stateDir, {
+    profiles: Object.fromEntries(
+      Array.from({ length: 5 }, (_, index) => {
+        const profileId = `openai-codex:profile-${index + 1}`;
+        return [profileId, createOauthProfile({
+          access: `access-${index + 1}`,
+          refresh: `refresh-${index + 1}`,
+          accountId: `account-${index + 1}`,
+          email: `user${index + 1}@example.com`,
+        })];
+      }),
+    ),
+  });
+
+  try {
+    const state = await loadDashboardState(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        fetchImpl: async () => {
+          callCount += 1;
+          activeRequests += 1;
+          maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          activeRequests -= 1;
+          return {
+            ok: true,
+            async json() {
+              return {
+                rate_limit: {
+                  primary_window: { used_percent: 10, reset_at: 200, limit_window_seconds: 18000 },
+                  secondary_window: { used_percent: 20, reset_at: 400, limit_window_seconds: 604800 },
+                },
+              };
+            },
+          };
+        },
+      },
+    );
+
+    assert.equal(callCount, 5);
+    assert.equal(maxActiveRequests, 2);
+    assert.equal(state.usageRefreshMetrics.remoteFetchCount, 5);
+    assert.equal(state.usageRefreshMetrics.cacheHitCount, 0);
+    assert.equal(state.usageRefreshMetrics.concurrencyLimit, 2);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("loadDashboardState reuses cached quota results within thirty seconds", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-cache-hit-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  let now = 1_000;
+  let callCount = 0;
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": createOauthProfile({
+        access: "cache-access-1",
+        refresh: "cache-refresh-1",
+        accountId: "cache-account-1",
+        email: "default@example.com",
+      }),
+      "openai-codex:work": createOauthProfile({
+        access: "cache-access-2",
+        refresh: "cache-refresh-2",
+        accountId: "cache-account-2",
+        email: "work@example.com",
+      }),
+    },
+  });
+
+  try {
+    const firstState = await loadDashboardState(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        now: () => now,
+        fetchImpl: async () => {
+          callCount += 1;
+          return {
+            ok: true,
+            async json() {
+              return {
+                rate_limit: {
+                  primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+                  secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+                },
+              };
+            },
+          };
+        },
+      },
+    );
+
+    now += 1_000;
+    const secondState = await loadDashboardState(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        now: () => now,
+        fetchImpl: async () => {
+          callCount += 1;
+          return {
+            ok: true,
+            async json() {
+              return {
+                rate_limit: {
+                  primary_window: { used_percent: 99, reset_at: 999, limit_window_seconds: 18000 },
+                  secondary_window: { used_percent: 99, reset_at: 999, limit_window_seconds: 604800 },
+                },
+              };
+            },
+          };
+        },
+      },
+    );
+
+    assert.equal(callCount, 2);
+    assert.equal(firstState.usageRefreshMetrics.remoteFetchCount, 2);
+    assert.equal(firstState.usageRefreshMetrics.cacheHitCount, 0);
+    assert.equal(secondState.usageRefreshMetrics.remoteFetchCount, 0);
+    assert.equal(secondState.usageRefreshMetrics.cacheHitCount, 2);
+    assert.equal(secondState.rows[0].secondary.usedPercent, firstState.rows[0].secondary.usedPercent);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("loadDashboardState invalidates cached quota results when the token changes", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-cache-miss-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  let now = 1_000;
+  let callCount = 0;
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": createOauthProfile({
+        access: "original-access",
+        refresh: "original-refresh",
+        accountId: "account-default",
+        email: "default@example.com",
+      }),
+    },
+  });
+
+  try {
+    await loadDashboardState(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        now: () => now,
+        fetchImpl: async () => {
+          callCount += 1;
+          return {
+            ok: true,
+            async json() {
+              return {
+                rate_limit: {
+                  primary_window: { used_percent: 10, reset_at: 200, limit_window_seconds: 18000 },
+                  secondary_window: { used_percent: 20, reset_at: 400, limit_window_seconds: 604800 },
+                },
+              };
+            },
+          };
+        },
+      },
+    );
+
+    writeLocalStore(stateDir, {
+      profiles: {
+        "openai-codex:default": createOauthProfile({
+          access: "rotated-access",
+          refresh: "original-refresh",
+          accountId: "account-default",
+          email: "default@example.com",
+        }),
+      },
+    });
+
+    now += 1_000;
+    const secondState = await loadDashboardState(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        now: () => now,
+        fetchImpl: async () => {
+          callCount += 1;
+          return {
+            ok: true,
+            async json() {
+              return {
+                rate_limit: {
+                  primary_window: { used_percent: 35, reset_at: 500, limit_window_seconds: 18000 },
+                  secondary_window: { used_percent: 45, reset_at: 800, limit_window_seconds: 604800 },
+                },
+              };
+            },
+          };
+        },
+      },
+    );
+
+    assert.equal(callCount, 2);
+    assert.equal(secondState.usageRefreshMetrics.remoteFetchCount, 1);
+    assert.equal(secondState.usageRefreshMetrics.cacheHitCount, 0);
+    assert.equal(secondState.rows[0].secondary.usedPercent, 45);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("applyOrder reuses warm quota cache when it reloads dashboard state", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-apply-cache-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  let now = 1_000;
+  let callCount = 0;
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": createOauthProfile({
+        access: "apply-access-default",
+        refresh: "apply-refresh-default",
+        accountId: "apply-account-default",
+        email: "default@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "default-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:work": createOauthProfile({
+        access: "apply-access-work",
+        refresh: "apply-refresh-work",
+        accountId: "apply-account-work",
+        email: "work@example.com",
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+  });
+
+  try {
+    await loadDashboardState(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        now: () => now,
+        fetchImpl: async () => {
+          callCount += 1;
+          return {
+            ok: true,
+            async json() {
+              return {
+                rate_limit: {
+                  primary_window: { used_percent: 20, reset_at: 200, limit_window_seconds: 18000 },
+                  secondary_window: { used_percent: 30, reset_at: 400, limit_window_seconds: 604800 },
+                },
+              };
+            },
+          };
+        },
+      },
+    );
+
+    now += 1_000;
+    const state = await applyOrder(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      ["openai-codex:work", "openai-codex:default"],
+      {
+        syncCodexSelection: true,
+        now: () => now,
+        fetchImpl: async () => {
+          callCount += 1;
+          return {
+            ok: true,
+            async json() {
+              return {
+                rate_limit: {
+                  primary_window: { used_percent: 80, reset_at: 900, limit_window_seconds: 18000 },
+                  secondary_window: { used_percent: 90, reset_at: 1200, limit_window_seconds: 604800 },
+                },
+              };
+            },
+          };
+        },
+      },
+    );
+
+    assert.equal(callCount, 2);
+    assert.equal(state.applyResult?.codexSelectionAttempted, true);
+    assert.equal(state.applyResult?.codexSelectionUpdated, false);
+    assert.equal(state.usageRefreshMetrics.remoteFetchCount, 0);
+    assert.equal(state.usageRefreshMetrics.cacheHitCount, 2);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }

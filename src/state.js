@@ -27,7 +27,6 @@ import {
   readCodexAuthFile,
   writeCodexAuthFile,
 } from "./codex-cli-auth.js";
-import { fetchCodexUsage } from "./codex-api.js";
 import {
   buildStoredCodexCredential,
   enrichOpenAICodexCredential,
@@ -48,6 +47,7 @@ import { readJsonFile } from "./json-files.js";
 import { buildConfigAudit, buildWarnings, recommendProfileOrder } from "./order.js";
 import { resolvePaths } from "./paths.js";
 import { clearAutoAuthProfileOverrides, readSessionStore, writeSessionStore } from "./session-store.js";
+import { loadUsageRefreshBatch } from "./usage-refresh.js";
 import { dedupeStrings, isRecord, toErrorMessage } from "./utils.js";
 
 function resolveAccountId(credential) {
@@ -168,6 +168,15 @@ function createApplyResult(overrides = {}) {
     codexSelectionProfileId: null,
     codexSelectionSkippedReason: null,
     ...overrides,
+  };
+}
+
+function createEmptyUsage(error = null) {
+  return {
+    primary: { label: null, usedPercent: null, remainingPercent: null, resetAt: null },
+    secondary: { label: null, usedPercent: null, remainingPercent: null, resetAt: null },
+    plan: null,
+    error,
   };
 }
 
@@ -605,30 +614,34 @@ export async function loadDashboardState(options = {}, deps = {}) {
   const runtimeProfileIds = profiles.map((entry) => entry.profileId);
   const currentEffectiveOrder = computeEffectiveOrder(authStore, configOrder);
 
+  const usageByProfileId = new Map();
+  const usageRequests = [];
+  for (const entry of profiles) {
+    try {
+      usageRequests.push({
+        profileId: entry.profileId,
+        token: resolveUsageToken(entry.credential),
+        accountId: resolveAccountId(entry.credential) ?? undefined,
+      });
+    } catch (error) {
+      usageByProfileId.set(entry.profileId, createEmptyUsage(toErrorMessage(error)));
+    }
+  }
+
+  const usageBatch = await loadUsageRefreshBatch(usageRequests, {
+    fetchImpl: deps.fetchImpl || fetch,
+    now: deps.now,
+    cacheTtlMs: deps.usageCacheTtlMs,
+    concurrency: deps.usageFetchConcurrency,
+  });
+  for (const [profileId, usage] of usageBatch.usageByProfileId.entries()) {
+    usageByProfileId.set(profileId, usage);
+  }
+
   const rows = [];
   for (const entry of profiles) {
     const currentOrderIndex = currentEffectiveOrder.indexOf(entry.profileId);
-    let usage = {
-      primary: { label: null, usedPercent: null, remainingPercent: null, resetAt: null },
-      secondary: { label: null, usedPercent: null, remainingPercent: null, resetAt: null },
-      plan: null,
-      error: null,
-    };
-
-    try {
-      usage = await fetchCodexUsage({
-        token: resolveUsageToken(entry.credential),
-        accountId: resolveAccountId(entry.credential) ?? undefined,
-        fetchImpl: deps.fetchImpl || fetch,
-      });
-    } catch (error) {
-      usage = {
-        primary: { label: null, usedPercent: null, remainingPercent: null, resetAt: null },
-        secondary: { label: null, usedPercent: null, remainingPercent: null, resetAt: null },
-        plan: null,
-        error: toErrorMessage(error),
-      };
-    }
+    const usage = usageByProfileId.get(entry.profileId) || createEmptyUsage();
 
     const credential = entry.credential;
     rows.push({
@@ -710,6 +723,7 @@ export async function loadDashboardState(options = {}, deps = {}) {
     warnings,
     notes: createNotes(),
     audit,
+    usageRefreshMetrics: usageBatch.metrics,
     actions: {
       canBootstrap: !localStoreReady,
       canImportBundle: true,
