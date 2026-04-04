@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_STATE_DIRNAME } from "./constants.js";
+import { DEFAULT_LOCAL_STATE_DIRNAME, DEFAULT_STATE_DIRNAME } from "./constants.js";
 import { readJsonObject } from "./json-files.js";
 import { dedupeStrings, isRecord } from "./utils.js";
 
@@ -42,6 +42,10 @@ function resolveDefaultAgentId(agentIds, config) {
 }
 
 export function resolvePaths(options = {}) {
+  const localStateDir =
+    options.localStateDir ||
+    process.env.CODEX_DASHBOARD_LOCAL_STATE_DIR ||
+    path.join(process.cwd(), DEFAULT_LOCAL_STATE_DIRNAME);
   const stateDir =
     options.stateDir ||
     process.env.OPENCLAW_STATE_DIR ||
@@ -62,11 +66,19 @@ export function resolvePaths(options = {}) {
     process.env.OPENCLAW_AGENT_DIR ||
     process.env.PI_CODING_AGENT_DIR ||
     path.join(stateDir, "agents", agentId, "agent");
-  const authStorePath = path.join(agentDir, "auth-profiles.json");
+  const codexAuthPath =
+    options.codexAuthPath ||
+    process.env.CODEX_AUTH_PATH ||
+    path.join(os.homedir(), ".codex", "auth.json");
+  const localAuthStorePath = path.join(localStateDir, "auth-store.json");
+  const runtimeAuthStorePath = path.join(agentDir, "auth-profiles.json");
   const sessionsDir = path.join(stateDir, "agents", agentId, "sessions");
   const sessionStorePath = path.join(sessionsDir, "sessions.json");
 
   return {
+    localStateDir,
+    localAuthStorePath,
+    localAuthStoreExists: pathExists(localAuthStorePath),
     stateDir,
     configPath,
     configExists,
@@ -74,10 +86,14 @@ export function resolvePaths(options = {}) {
     availableAgentIds,
     agentId,
     agentDir,
-    authStorePath,
+    codexAuthPath,
+    authStorePath: localAuthStorePath,
+    runtimeAuthStorePath,
     sessionsDir,
     sessionStorePath,
-    authStoreExists: pathExists(authStorePath),
+    codexAuthExists: pathExists(codexAuthPath),
+    authStoreExists: pathExists(localAuthStorePath),
+    runtimeAuthStoreExists: pathExists(runtimeAuthStorePath),
     sessionStoreExists: pathExists(sessionStorePath),
   };
 }

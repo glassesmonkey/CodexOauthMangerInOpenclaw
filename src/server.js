@@ -1,5 +1,21 @@
 import http from "node:http";
-import { LoginManager, applyOrder, deleteProfile, loadDashboardState, renameProfile, syncConfig } from "./state.js";
+import {
+  LoginManager,
+  absorbOpenClawRuntime,
+  applyOrder,
+  bootstrapLocalStore,
+  commitImportBundle,
+  deleteProfile,
+  exportBundle,
+  linkCurrentCodexToProfile,
+  loadDashboardState,
+  previewImportBundle,
+  renameProfile,
+  rebuildRuntime,
+  runTokenKeepalive,
+  switchProfile,
+  syncConfig,
+} from "./state.js";
 import { renderHtml } from "./ui.js";
 import { createUsageFetch } from "./usage-fetch.js";
 
@@ -75,13 +91,80 @@ export async function startDashboardServer(options = {}) {
       if (request.method === "POST" && url.pathname === "/api/apply-order") {
         const body = await readBody(request);
         const order = Array.isArray(body.order) ? body.order.filter((entry) => typeof entry === "string") : [];
-        sendJson(response, 200, await applyOrder(options, order, createStateDeps(url, body)));
+        sendJson(response, 200, await applyOrder(options, order, {
+          ...createStateDeps(url, body),
+          syncCodexSelection: parseBoolean(body.syncCodexSelection),
+        }));
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/api/sync-config") {
         const body = await readBody(request);
         sendJson(response, 200, await syncConfig(options, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/bootstrap-local-store") {
+        const body = await readBody(request);
+        sendJson(response, 200, await bootstrapLocalStore(options, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/rebuild-runtime") {
+        const body = await readBody(request);
+        sendJson(response, 200, await rebuildRuntime(options, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/absorb-openclaw-runtime") {
+        const body = await readBody(request);
+        sendJson(response, 200, await absorbOpenClawRuntime(options, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/keepalive/run") {
+        const body = await readBody(request);
+        sendJson(response, 200, await runTokenKeepalive(options, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/export-bundle") {
+        const body = await readBody(request);
+        sendJson(response, 200, await exportBundle(options, body, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/import-bundle/preview") {
+        const body = await readBody(request);
+        sendJson(response, 200, await previewImportBundle(options, body, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/import-bundle/commit") {
+        const body = await readBody(request);
+        sendJson(response, 200, await commitImportBundle(options, body, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/switch-profile") {
+        const body = await readBody(request);
+        const profileId = typeof body.profileId === "string" ? body.profileId.trim() : "";
+        if (!profileId) {
+          sendJson(response, 400, { error: "profileId is required." });
+          return;
+        }
+        sendJson(response, 200, await switchProfile(options, profileId, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/link-current-codex") {
+        const body = await readBody(request);
+        const profileId = typeof body.profileId === "string" ? body.profileId.trim() : "";
+        if (!profileId) {
+          sendJson(response, 400, { error: "profileId is required." });
+          return;
+        }
+        sendJson(response, 200, await linkCurrentCodexToProfile(options, profileId, createStateDeps(url, body)));
         return;
       }
 
@@ -111,6 +194,7 @@ export async function startDashboardServer(options = {}) {
       if (request.method === "POST" && url.pathname === "/api/login/start") {
         const body = await readBody(request);
         const profileId = typeof body.profileId === "string" ? body.profileId.trim() : "";
+        const intent = body.intent === "upgrade" ? "upgrade" : "create";
         if (!profileId) {
           sendJson(response, 400, { error: "profileId is required." });
           return;
@@ -118,7 +202,7 @@ export async function startDashboardServer(options = {}) {
         const task = loginManager.start({
           ...options,
           usageProxy: resolveUsageProxyConfig(url, body),
-        }, profileId);
+        }, { profileId, intent });
         // Give onAuth a brief chance to populate the URL before responding.
         await new Promise((resolve) => setTimeout(resolve, 150));
         sendJson(response, 200, loginManager.getTask(task.taskId) || task);

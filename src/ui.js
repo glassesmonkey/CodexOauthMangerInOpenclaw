@@ -60,47 +60,85 @@ export function renderHtml() {
     <style>
       :root {
         color-scheme: light;
-        --bg: #f5f5f7;
-        --bg-deep: #ececf0;
-        --surface: rgba(255, 255, 255, 0.82);
-        --surface-strong: rgba(255, 255, 255, 0.92);
-        --surface-muted: rgba(248, 248, 250, 0.94);
-        --line: rgba(29, 29, 31, 0.08);
-        --line-strong: rgba(29, 29, 31, 0.16);
-        --text: #1d1d1f;
-        --muted: #6e6e73;
-        --accent: #0071e3;
-        --accent-strong: #0055cc;
-        --accent-2: #8e8e93;
-        --accent-2-soft: rgba(110, 110, 115, 0.08);
-        --ok: #34a853;
-        --warn: #ff9f0a;
-        --danger: #ff453a;
-        --info: #5ac8fa;
-        --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.04);
-        --shadow-card: 0 10px 32px rgba(0, 0, 0, 0.05);
-        --radius-xl: 30px;
-        --radius-lg: 24px;
+        --bg: #f4efe6;
+        --bg-deep: #e8dfd2;
+        --surface: rgba(252, 248, 241, 0.82);
+        --surface-strong: rgba(255, 251, 245, 0.92);
+        --surface-muted: rgba(246, 239, 229, 0.9);
+        --line: rgba(78, 56, 34, 0.14);
+        --line-strong: rgba(78, 56, 34, 0.26);
+        --text: #20160f;
+        --muted: #715c4a;
+        --accent: #8e3b25;
+        --accent-strong: #612414;
+        --accent-2: #1c5a56;
+        --accent-2-soft: rgba(28, 90, 86, 0.08);
+        --ok: #21674d;
+        --warn: #b96d1e;
+        --danger: #a23d31;
+        --info: #345a87;
+        --shadow-soft: 0 14px 34px rgba(63, 35, 12, 0.08);
+        --shadow-card: 0 28px 70px rgba(63, 35, 12, 0.11);
+        --radius-xl: 34px;
+        --radius-lg: 26px;
         --radius-md: 18px;
         --radius-sm: 12px;
-        --mono: "SF Mono", "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
-        --display: "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-        --sans: "SF Pro Text", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        --mono: "IBM Plex Mono", "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+        --display: "Iowan Old Style", "Palatino Linotype", "Songti SC", "STSong", serif;
+        --sans: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
       }
 
       * { box-sizing: border-box; }
 
-      html { background: linear-gradient(180deg, #fafafc 0%, var(--bg) 100%); }
+      html {
+        background:
+          radial-gradient(circle at top left, rgba(28, 90, 86, 0.16), transparent 28%),
+          radial-gradient(circle at 85% 12%, rgba(142, 59, 37, 0.18), transparent 26%),
+          linear-gradient(180deg, #f7f0e6 0%, var(--bg) 100%);
+      }
 
       body {
         margin: 0;
         min-height: 100vh;
         color: var(--text);
         font-family: var(--sans);
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0));
+        background:
+          linear-gradient(180deg, rgba(255, 251, 245, 0.68), rgba(255, 251, 245, 0.22)),
+          repeating-linear-gradient(
+            90deg,
+            rgba(84, 62, 40, 0.035) 0,
+            rgba(84, 62, 40, 0.035) 1px,
+            transparent 1px,
+            transparent 84px
+          );
       }
 
-      body::before { content: none; }
+      body::before,
+      body::after {
+        content: "";
+        position: fixed;
+        inset: auto;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      body::before {
+        top: 0;
+        right: 0;
+        width: 38vw;
+        height: 38vw;
+        background: radial-gradient(circle, rgba(142, 59, 37, 0.14), transparent 68%);
+        filter: blur(18px);
+      }
+
+      body::after {
+        left: -8vw;
+        bottom: -8vw;
+        width: 34vw;
+        height: 34vw;
+        background: radial-gradient(circle, rgba(28, 90, 86, 0.12), transparent 70%);
+        filter: blur(20px);
+      }
 
       button,
       input {
@@ -120,15 +158,15 @@ export function renderHtml() {
 
       button:focus-visible,
       input:focus-visible {
-        box-shadow: 0 0 0 3px rgba(15, 109, 89, 0.16);
+        box-shadow: 0 0 0 3px rgba(142, 59, 37, 0.16);
       }
 
       .shell {
         position: relative;
         z-index: 1;
-        max-width: 1320px;
+        max-width: 1480px;
         margin: 0 auto;
-        padding: 28px 20px 48px;
+        padding: 34px 24px 56px;
       }
 
       .card {
@@ -138,10 +176,17 @@ export function renderHtml() {
         border: 1px solid var(--line);
         border-radius: var(--radius-xl);
         box-shadow: var(--shadow-card);
-        backdrop-filter: blur(18px);
+        backdrop-filter: blur(16px);
       }
 
-      .card::after { content: none; }
+      .card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        border: 1px solid rgba(255, 255, 255, 0.45);
+        pointer-events: none;
+      }
 
       .section-kicker {
         margin: 0 0 8px;
@@ -152,7 +197,11 @@ export function renderHtml() {
       }
 
       .masthead {
-        padding: 28px;
+        padding: 32px;
+        background:
+          linear-gradient(140deg, rgba(37, 24, 18, 0.95), rgba(55, 33, 23, 0.88)),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
+        color: #f8efe3;
         animation: rise 420ms ease;
       }
 
@@ -161,13 +210,26 @@ export function renderHtml() {
         z-index: 1;
         display: grid;
         gap: 24px;
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: minmax(0, 1fr) minmax(340px, 430px);
         align-items: start;
+      }
+
+      .masthead::before {
+        content: "CONTROL ROOM";
+        position: absolute;
+        right: 28px;
+        top: 18px;
+        font-family: var(--display);
+        font-size: clamp(2.8rem, 10vw, 7rem);
+        line-height: 0.9;
+        letter-spacing: 0.04em;
+        color: rgba(255, 245, 234, 0.06);
+        pointer-events: none;
       }
 
       .brand-panel {
         display: grid;
-        gap: 16px;
+        gap: 20px;
         grid-template-columns: auto minmax(0, 1fr);
         align-items: start;
       }
@@ -178,10 +240,10 @@ export function renderHtml() {
         width: 72px;
         height: 72px;
         padding: 8px;
-        border-radius: 22px;
-        background: rgba(255, 255, 255, 0.9);
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(255, 248, 238, 0.16), rgba(255, 248, 238, 0.04));
+        border: 1px solid rgba(255, 244, 227, 0.2);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
       }
 
       .brand-symbol-svg {
@@ -193,9 +255,9 @@ export function renderHtml() {
       .eyebrow {
         margin: 0 0 6px;
         font-size: 0.78rem;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.16em;
         text-transform: uppercase;
-        color: var(--muted);
+        color: rgba(248, 239, 227, 0.72);
       }
 
       h1,
@@ -203,13 +265,13 @@ export function renderHtml() {
       h3 {
         margin: 0;
         font-family: var(--display);
-        font-weight: 600;
-        letter-spacing: -0.02em;
+        font-weight: 700;
+        letter-spacing: -0.03em;
       }
 
       h1 {
-        font-size: clamp(2rem, 4vw, 3.25rem);
-        line-height: 1;
+        font-size: clamp(2.6rem, 4.8vw, 4.4rem);
+        line-height: 0.92;
         font-weight: 700;
       }
 
@@ -233,22 +295,28 @@ export function renderHtml() {
         margin-top: 16px;
         padding: 8px 12px;
         border-radius: 999px;
-        border: 1px solid rgba(29, 29, 31, 0.08);
-        background: rgba(255, 255, 255, 0.7);
-        color: var(--muted);
+        border: 1px solid rgba(255, 235, 215, 0.18);
+        background: rgba(255, 244, 231, 0.08);
+        color: rgba(248, 239, 227, 0.78);
         font-size: 0.8rem;
       }
 
       .hero-note strong {
-        color: var(--text);
+        color: #ffd8bc;
+      }
+
+      .toolbar-panel {
+        display: grid;
+        gap: 14px;
+        justify-items: stretch;
       }
 
       .masthead-actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
-        justify-content: flex-end;
-        align-content: start;
+        gap: 10px;
+        align-items: center;
+        justify-content: flex-start;
       }
 
       .button-primary,
@@ -256,9 +324,21 @@ export function renderHtml() {
       .button-ghost,
       .button-danger {
         min-height: 40px;
-        padding: 10px 14px;
-        border-radius: 999px;
-        transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease, background 140ms ease, border-color 140ms ease;
+        padding: 11px 15px;
+        border-radius: 14px;
+        border: 1px solid transparent;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        font-size: 0.74rem;
+        font-weight: 700;
+        transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease, background 140ms ease, border-color 140ms ease, color 140ms ease;
+      }
+
+      .masthead-actions > .button-primary,
+      .masthead-actions > .button-secondary,
+      .masthead-actions > .button-ghost,
+      .masthead-actions > .toolbar-menu {
+        flex: 0 0 auto;
       }
 
       .button-primary:hover:not(:disabled),
@@ -277,27 +357,208 @@ export function renderHtml() {
       }
 
       .button-primary {
-        color: #fff;
-        background: linear-gradient(180deg, #1b1b1d, #0f0f10);
-        box-shadow: none;
+        color: #fff6ed;
+        background: linear-gradient(180deg, #a14528, #7a2c17);
+        border-color: rgba(255, 215, 187, 0.18);
+        box-shadow: 0 12px 24px rgba(122, 44, 23, 0.22);
       }
 
       .button-secondary {
         color: var(--text);
-        background: rgba(255, 255, 255, 0.68);
-        border: 1px solid var(--line);
+        background: rgba(255, 247, 237, 0.9);
+        border: 1px solid rgba(101, 72, 45, 0.16);
       }
 
       .button-ghost {
-        color: var(--text);
-        background: rgba(242, 242, 247, 0.92);
-        border: 1px solid rgba(29, 29, 31, 0.06);
+        color: #f8efe3;
+        background: rgba(255, 244, 231, 0.06);
+        border: 1px solid rgba(255, 235, 215, 0.12);
       }
 
       .button-danger {
-        color: #fff;
-        background: linear-gradient(180deg, #ff6a61, var(--danger));
-        box-shadow: none;
+        color: #fff6f4;
+        background: linear-gradient(180deg, #c35746, var(--danger));
+        box-shadow: 0 12px 24px rgba(162, 61, 49, 0.18);
+      }
+
+      .toolbar-inline-hint {
+        display: none;
+        min-height: 40px;
+        padding: 10px 12px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 236, 213, 0.12);
+        background: rgba(255, 245, 230, 0.05);
+        color: rgba(248, 239, 227, 0.76);
+        font-size: 0.8rem;
+        line-height: 1.45;
+      }
+
+      .toolbar-help-card {
+        display: grid;
+        gap: 10px;
+        padding: 18px 18px 16px;
+        border-radius: 22px;
+        border: 1px solid rgba(255, 236, 213, 0.12);
+        background:
+          linear-gradient(180deg, rgba(255, 249, 239, 0.08), rgba(255, 249, 239, 0.02)),
+          rgba(255, 247, 236, 0.04);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+
+      .toolbar-help-eyebrow {
+        font-size: 0.72rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: rgba(248, 239, 227, 0.54);
+      }
+
+      .toolbar-help-title {
+        color: #fff3e6;
+        font-size: 1.26rem;
+        line-height: 1;
+      }
+
+      .toolbar-help-copy {
+        margin: 0;
+        color: rgba(248, 239, 227, 0.82);
+        font-size: 0.9rem;
+        line-height: 1.55;
+      }
+
+      .toolbar-help-meta {
+        display: grid;
+        gap: 10px;
+      }
+
+      .toolbar-help-meta-item {
+        display: grid;
+        gap: 4px;
+      }
+
+      .toolbar-help-meta-label {
+        font-size: 0.7rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: rgba(248, 239, 227, 0.54);
+      }
+
+      .toolbar-help-meta-value {
+        color: rgba(248, 239, 227, 0.88);
+        font-size: 0.82rem;
+        line-height: 1.45;
+      }
+
+      .toolbar-menu {
+        position: relative;
+        flex: 0 0 auto;
+      }
+
+      .toolbar-menu summary {
+        list-style: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+
+      .toolbar-menu summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .toolbar-menu.is-disabled summary {
+        pointer-events: none;
+        opacity: 0.56;
+      }
+
+      .toolbar-menu-trigger {
+        min-width: 118px;
+      }
+
+      .toolbar-menu[open] .toolbar-menu-trigger {
+        background: rgba(255, 252, 247, 0.98);
+        box-shadow: 0 12px 24px rgba(63, 35, 12, 0.08);
+      }
+
+      .toolbar-menu-panel {
+        position: absolute;
+        right: 0;
+        top: calc(100% + 10px);
+        z-index: 10;
+        width: min(360px, calc(100vw - 32px));
+        display: grid;
+        gap: 14px;
+        padding: 16px;
+        border-radius: 20px;
+        border: 1px solid rgba(95, 68, 42, 0.18);
+        background:
+          radial-gradient(circle at top right, rgba(28, 90, 86, 0.1), transparent 28%),
+          linear-gradient(180deg, rgba(255, 252, 247, 0.99), rgba(245, 236, 224, 0.98));
+        box-shadow: 0 26px 50px rgba(34, 22, 13, 0.22);
+      }
+
+      .toolbar-menu[data-vertical="up"] .toolbar-menu-panel {
+        top: auto;
+        bottom: calc(100% + 10px);
+      }
+
+      .toolbar-menu[data-horizontal="left"] .toolbar-menu-panel {
+        right: auto;
+        left: 0;
+      }
+
+      .toolbar-menu-group {
+        display: grid;
+        gap: 8px;
+      }
+
+      .toolbar-menu-group + .toolbar-menu-group {
+        padding-top: 12px;
+        border-top: 1px solid rgba(95, 68, 42, 0.12);
+      }
+
+      .toolbar-menu-group-label {
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .toolbar-menu-button {
+        display: grid;
+        gap: 4px;
+        width: 100%;
+        padding: 12px 13px;
+        border-radius: 14px;
+        border: 1px solid rgba(95, 68, 42, 0.12);
+        background: rgba(255, 251, 245, 0.74);
+        color: var(--text);
+        text-align: left;
+        transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+      }
+
+      .toolbar-menu-button:hover:not(:disabled),
+      .toolbar-menu-button:focus-visible {
+        transform: translateY(-1px);
+        border-color: rgba(142, 59, 37, 0.2);
+        background: rgba(255, 252, 247, 0.98);
+        box-shadow: 0 12px 24px rgba(63, 35, 12, 0.08);
+      }
+
+      .toolbar-menu-button:disabled {
+        opacity: 0.56;
+        cursor: wait;
+      }
+
+      .toolbar-menu-button-title {
+        font-size: 0.84rem;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+
+      .toolbar-menu-button-copy {
+        color: var(--muted);
+        font-size: 0.76rem;
+        line-height: 1.45;
       }
 
       .summary-grid {
@@ -312,15 +573,17 @@ export function renderHtml() {
       .summary-card,
       .spotlight-card {
         position: relative;
-        padding: 22px;
+        padding: 24px;
         border-radius: var(--radius-lg);
-        border: 1px solid rgba(29, 29, 31, 0.06);
+        border: 1px solid rgba(95, 68, 42, 0.14);
         background: var(--surface-strong);
         box-shadow: var(--shadow-soft);
       }
 
       .spotlight-card {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 250, 252, 0.94));
+        background:
+          radial-gradient(circle at top right, rgba(28, 90, 86, 0.16), transparent 32%),
+          linear-gradient(180deg, rgba(255, 251, 245, 0.98), rgba(246, 237, 224, 0.94));
       }
 
       .spotlight-head {
@@ -338,9 +601,9 @@ export function renderHtml() {
         min-height: 42px;
         padding: 0 12px;
         border-radius: 999px;
-        background: rgba(242, 242, 247, 0.96);
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        color: var(--muted);
+        background: rgba(32, 22, 15, 0.92);
+        border: 1px solid rgba(255, 228, 201, 0.16);
+        color: #f6e8d9;
         font-family: var(--mono);
         font-size: 0.8rem;
       }
@@ -430,8 +693,8 @@ export function renderHtml() {
         min-height: 28px;
         padding: 0 12px;
         border-radius: 999px;
-        background: rgba(242, 242, 247, 0.96);
-        color: var(--muted);
+        background: rgba(32, 22, 15, 0.08);
+        color: var(--text);
         font-size: 0.78rem;
       }
 
@@ -443,8 +706,8 @@ export function renderHtml() {
         min-height: 28px;
         padding: 5px 10px;
         border-radius: 999px;
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: rgba(242, 242, 247, 0.92);
+        border: 1px solid rgba(95, 68, 42, 0.14);
+        background: rgba(255, 247, 236, 0.86);
         color: var(--text);
         font-size: 0.76rem;
       }
@@ -515,8 +778,8 @@ export function renderHtml() {
         gap: 2px;
         padding: 14px 14px 13px;
         border-radius: var(--radius-md);
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: rgba(255, 255, 255, 0.82);
+        border: 1px solid rgba(95, 68, 42, 0.12);
+        background: rgba(255, 251, 245, 0.82);
       }
 
       .stat-label {
@@ -541,17 +804,17 @@ export function renderHtml() {
       }
 
       .stat-box.available {
-        background: linear-gradient(180deg, rgba(245, 251, 247, 0.98), rgba(239, 249, 243, 0.92));
-        border-color: rgba(52, 168, 83, 0.12);
+        background: linear-gradient(180deg, rgba(242, 250, 245, 0.98), rgba(229, 244, 236, 0.92));
+        border-color: rgba(33, 103, 77, 0.14);
       }
 
       .stat-box.depleted {
-        background: linear-gradient(180deg, rgba(255, 249, 240, 0.98), rgba(255, 244, 234, 0.92));
-        border-color: rgba(255, 159, 10, 0.14);
+        background: linear-gradient(180deg, rgba(255, 246, 237, 0.98), rgba(248, 232, 219, 0.94));
+        border-color: rgba(185, 109, 30, 0.16);
       }
 
       .stat-box.total {
-        background: linear-gradient(180deg, rgba(250, 250, 252, 0.98), rgba(245, 245, 247, 0.92));
+        background: linear-gradient(180deg, rgba(255, 251, 245, 0.98), rgba(244, 237, 227, 0.92));
       }
 
       .summary-meta {
@@ -568,8 +831,8 @@ export function renderHtml() {
         min-height: 30px;
         padding: 0 12px;
         border-radius: 999px;
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: rgba(242, 242, 247, 0.9);
+        border: 1px solid rgba(95, 68, 42, 0.12);
+        background: rgba(250, 242, 232, 0.92);
       }
 
       .summary-meta-value {
@@ -609,10 +872,10 @@ export function renderHtml() {
 
       .flash-banner {
         margin-top: 16px;
-        padding: 12px 14px;
+        padding: 13px 16px;
         border-radius: var(--radius-md);
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: rgba(255, 255, 255, 0.82);
+        border: 1px solid rgba(95, 68, 42, 0.16);
+        background: rgba(255, 250, 243, 0.9);
         box-shadow: var(--shadow-soft);
         font-size: 0.86rem;
         line-height: 1.4;
@@ -676,8 +939,8 @@ export function renderHtml() {
         min-height: 38px;
         padding: 0 14px;
         border-radius: 999px;
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: rgba(255, 255, 255, 0.82);
+        border: 1px solid rgba(95, 68, 42, 0.14);
+        background: rgba(255, 249, 241, 0.92);
         box-shadow: none;
         animation: rise 240ms ease;
         scroll-snap-align: start;
@@ -837,9 +1100,9 @@ export function renderHtml() {
       }
 
       .tabbar-card {
-        padding: 6px;
-        border-radius: 999px;
-        background: rgba(242, 242, 247, 0.92);
+        padding: 8px;
+        border-radius: 20px;
+        background: rgba(248, 240, 230, 0.86);
       }
 
       .tabbar {
@@ -851,10 +1114,10 @@ export function renderHtml() {
 
       .tab-button {
         flex: 0 0 auto;
-        min-height: 36px;
-        padding: 8px 16px;
-        border-radius: 999px;
-        border: 1px solid transparent;
+        min-height: 38px;
+        padding: 8px 18px;
+        border-radius: 14px;
+        border: 1px solid rgba(95, 68, 42, 0.06);
         background: transparent;
         color: var(--muted);
         transition: transform 140ms ease, background 140ms ease, color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
@@ -867,9 +1130,9 @@ export function renderHtml() {
 
       .tab-button[aria-selected="true"] {
         color: var(--text);
-        border-color: rgba(29, 29, 31, 0.04);
-        background: rgba(255, 255, 255, 0.96);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border-color: rgba(95, 68, 42, 0.12);
+        background: rgba(255, 252, 247, 0.98);
+        box-shadow: 0 10px 22px rgba(63, 35, 12, 0.08);
       }
 
       .tab-button-label {
@@ -895,7 +1158,7 @@ export function renderHtml() {
       }
 
       .panel {
-        padding: 24px;
+        padding: 26px;
         animation: rise 460ms ease;
       }
 
@@ -925,8 +1188,8 @@ export function renderHtml() {
         gap: 6px;
         padding: 6px;
         border-radius: 999px;
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: rgba(242, 242, 247, 0.86);
+        border: 1px solid rgba(95, 68, 42, 0.12);
+        background: rgba(248, 240, 230, 0.86);
       }
 
       .view-switch-button {
@@ -940,9 +1203,9 @@ export function renderHtml() {
       }
 
       .view-switch-button.active {
-        background: rgba(255, 255, 255, 0.98);
+        background: rgba(255, 252, 247, 0.98);
         color: var(--text);
-        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.06);
+        box-shadow: 0 10px 22px rgba(63, 35, 12, 0.08);
       }
 
       .order-grid {
@@ -954,7 +1217,7 @@ export function renderHtml() {
       .order-card {
         padding: 18px;
         border-radius: var(--radius-lg);
-        border: 1px solid rgba(29, 29, 31, 0.06);
+        border: 1px solid rgba(95, 68, 42, 0.14);
         background: var(--surface-muted);
       }
 
@@ -976,8 +1239,8 @@ export function renderHtml() {
         gap: 8px;
         padding: 12px;
         border-radius: var(--radius-md);
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: rgba(255, 255, 255, 0.86);
+        border: 1px solid rgba(95, 68, 42, 0.12);
+        background: rgba(255, 251, 245, 0.9);
       }
 
       .order-entry-head {
@@ -994,7 +1257,7 @@ export function renderHtml() {
         width: 32px;
         height: 32px;
         border-radius: 999px;
-        background: rgba(242, 242, 247, 0.96);
+        background: rgba(32, 22, 15, 0.08);
         color: var(--muted);
         font-family: var(--mono);
         font-size: 0.76rem;
@@ -1087,7 +1350,7 @@ export function renderHtml() {
       .settings-section + .settings-section {
         margin-top: 18px;
         padding-top: 18px;
-        border-top: 1px solid rgba(29, 29, 31, 0.06);
+        border-top: 1px solid rgba(95, 68, 42, 0.12);
       }
 
       .field {
@@ -1115,8 +1378,8 @@ export function renderHtml() {
         min-height: 44px;
         padding: 11px 14px;
         border-radius: 14px;
-        border: 1px solid rgba(29, 29, 31, 0.08);
-        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid rgba(95, 68, 42, 0.16);
+        background: rgba(255, 251, 245, 0.96);
         color: var(--text);
       }
 
@@ -1154,8 +1417,8 @@ export function renderHtml() {
       .profile-group {
         padding: 18px;
         border-radius: var(--radius-lg);
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 246, 249, 0.94));
+        border: 1px solid rgba(95, 68, 42, 0.14);
+        background: linear-gradient(180deg, rgba(255, 251, 245, 0.98), rgba(242, 234, 223, 0.94));
       }
 
       .profile-group-head {
@@ -1188,20 +1451,23 @@ export function renderHtml() {
 
       .profile-card {
         display: grid;
-        gap: 12px;
-        padding: 18px;
+        gap: 14px;
+        padding: 20px;
         border-radius: var(--radius-lg);
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 248, 250, 0.94));
+        border: 1px solid rgba(95, 68, 42, 0.14);
+        background:
+          radial-gradient(circle at top right, rgba(142, 59, 37, 0.07), transparent 28%),
+          linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(244, 236, 226, 0.95));
+        box-shadow: 0 18px 36px rgba(63, 35, 12, 0.08);
       }
 
       .profile-card.top {
-        border-color: rgba(0, 113, 227, 0.12);
-        box-shadow: 0 10px 30px rgba(0, 113, 227, 0.08);
+        border-color: rgba(142, 59, 37, 0.22);
+        box-shadow: 0 20px 42px rgba(122, 44, 23, 0.14);
       }
 
       .profile-card.problem {
-        border-color: rgba(161, 54, 51, 0.16);
+        border-color: rgba(162, 61, 49, 0.26);
       }
 
       .profile-head {
@@ -1229,10 +1495,10 @@ export function renderHtml() {
         min-width: 36px;
         min-height: 36px;
         padding: 0 12px;
-        border-radius: 999px;
-        background: rgba(242, 242, 247, 0.96);
-        border: 1px solid rgba(29, 29, 31, 0.05);
-        color: var(--muted);
+        border-radius: 14px;
+        background: rgba(32, 22, 15, 0.92);
+        border: 1px solid rgba(255, 228, 201, 0.12);
+        color: #f7eadb;
         font-family: var(--mono);
         font-size: 0.76rem;
       }
@@ -1245,8 +1511,8 @@ export function renderHtml() {
 
       .profile-name {
         font-family: var(--display);
-        font-size: 1.08rem;
-        line-height: 1.12;
+        font-size: 1.28rem;
+        line-height: 1.04;
         font-weight: 600;
       }
 
@@ -1288,8 +1554,8 @@ export function renderHtml() {
         min-height: 26px;
         padding: 4px 9px;
         border-radius: 999px;
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: rgba(242, 242, 247, 0.92);
+        border: 1px solid rgba(95, 68, 42, 0.14);
+        background: rgba(252, 246, 236, 0.92);
         font-size: 0.74rem;
         color: var(--text);
       }
@@ -1312,13 +1578,13 @@ export function renderHtml() {
       .metric-card {
         padding: 14px 14px 12px;
         border-radius: var(--radius-md);
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(95, 68, 42, 0.12);
+        background: rgba(255, 251, 245, 0.88);
       }
 
       .metric-card.primary-window {
-        background: linear-gradient(180deg, rgba(246, 252, 248, 0.98), rgba(240, 249, 244, 0.92));
-        border-color: rgba(52, 168, 83, 0.1);
+        background: linear-gradient(180deg, rgba(239, 248, 242, 0.98), rgba(227, 242, 233, 0.92));
+        border-color: rgba(33, 103, 77, 0.14);
       }
 
       .metric-card.primary-window .metric strong {
@@ -1326,7 +1592,7 @@ export function renderHtml() {
       }
 
       .metric-card.secondary-window {
-        background: rgba(255, 255, 255, 0.82);
+        background: rgba(255, 248, 239, 0.84);
       }
 
       .metric-title {
@@ -1360,7 +1626,7 @@ export function renderHtml() {
         height: 8px;
         overflow: hidden;
         border-radius: 999px;
-        background: rgba(29, 29, 31, 0.08);
+        background: rgba(73, 48, 27, 0.1);
       }
 
       .metric-bar-fill {
@@ -1410,7 +1676,7 @@ export function renderHtml() {
         min-height: 22px;
         padding: 3px 8px;
         border-radius: 999px;
-        background: rgba(242, 242, 247, 0.96);
+        background: rgba(255, 245, 232, 0.94);
         color: var(--text);
         font-family: var(--mono);
         font-size: 0.72rem;
@@ -1451,9 +1717,9 @@ export function renderHtml() {
         min-width: 40px;
         min-height: 38px;
         padding: 0 12px;
-        border-radius: 999px;
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: rgba(242, 242, 247, 0.92);
+        border-radius: 14px;
+        border: 1px solid rgba(95, 68, 42, 0.12);
+        background: rgba(255, 247, 236, 0.92);
         color: var(--text);
         cursor: pointer;
         list-style: none;
@@ -1462,8 +1728,8 @@ export function renderHtml() {
       .profile-menu summary::-webkit-details-marker { display: none; }
 
       .profile-menu[open] summary {
-        background: rgba(255, 255, 255, 0.98);
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+        background: rgba(255, 252, 247, 0.98);
+        box-shadow: 0 14px 28px rgba(63, 35, 12, 0.1);
       }
 
       .profile-menu-list {
@@ -1476,9 +1742,9 @@ export function renderHtml() {
         min-width: 112px;
         padding: 8px;
         border-radius: 16px;
-        border: 1px solid rgba(29, 29, 31, 0.06);
-        background: rgba(255, 255, 255, 0.98);
-        box-shadow: 0 16px 30px rgba(0, 0, 0, 0.08);
+        border: 1px solid rgba(95, 68, 42, 0.14);
+        background: rgba(255, 252, 247, 0.98);
+        box-shadow: 0 18px 34px rgba(63, 35, 12, 0.14);
       }
 
       .profile-menu[data-vertical="up"] .profile-menu-list {
@@ -1495,7 +1761,7 @@ export function renderHtml() {
         min-height: 34px;
         padding: 8px 10px;
         border-radius: 12px;
-        background: rgba(242, 242, 247, 0.86);
+        background: rgba(250, 242, 232, 0.9);
         color: var(--text);
         text-align: left;
       }
@@ -1545,11 +1811,12 @@ export function renderHtml() {
         width: min(560px, 100%);
         padding: 24px;
         border-radius: 28px;
-        border: 1px solid rgba(67, 52, 38, 0.12);
+        border: 1px solid rgba(67, 52, 38, 0.16);
         background:
-          radial-gradient(circle at top right, rgba(255, 214, 170, 0.28), transparent 34%),
-          linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(255, 247, 239, 0.96));
-        box-shadow: 0 32px 80px rgba(50, 38, 25, 0.24);
+          radial-gradient(circle at top right, rgba(28, 90, 86, 0.18), transparent 34%),
+          radial-gradient(circle at bottom left, rgba(142, 59, 37, 0.18), transparent 28%),
+          linear-gradient(180deg, rgba(255, 252, 247, 0.99), rgba(252, 243, 233, 0.97));
+        box-shadow: 0 34px 90px rgba(50, 38, 25, 0.26);
       }
 
       .modal-top {
@@ -1710,8 +1977,12 @@ export function renderHtml() {
           grid-template-columns: 1fr;
         }
 
+        .toolbar-panel {
+          width: 100%;
+        }
+
         .masthead-actions {
-          justify-content: flex-start;
+          width: 100%;
         }
 
         .summary-grid,
@@ -1749,9 +2020,47 @@ export function renderHtml() {
           grid-template-columns: 1fr;
         }
 
+        .masthead::before {
+          right: 14px;
+          top: 14px;
+          font-size: 3.1rem;
+        }
+
         .brand-mark {
           width: 64px;
           height: 64px;
+        }
+
+        .profile-list,
+        .stat-grid.compact,
+        .summary-meta,
+        .metrics-column {
+          grid-template-columns: 1fr;
+        }
+
+        .masthead-actions {
+          gap: 8px;
+        }
+
+        .masthead-actions > .button-primary,
+        .masthead-actions > .button-secondary,
+        .masthead-actions > .button-ghost,
+        .masthead-actions > .toolbar-menu {
+          width: 100%;
+        }
+
+        .toolbar-help-card {
+          display: none;
+        }
+
+        .toolbar-inline-hint {
+          display: block;
+        }
+
+        .toolbar-menu-panel {
+          right: 0;
+          left: 0;
+          width: min(100%, calc(100vw - 24px));
         }
 
         .panel-head,
@@ -1808,11 +2117,61 @@ export function renderHtml() {
               <div class="hero-note"><strong>仅本地</strong></div>
             </div>
           </div>
-          <div class="masthead-actions">
-            <button id="refreshButton" class="button-secondary" type="button">刷新数据</button>
-            <button id="applyButton" class="button-primary" type="button">应用推荐顺序</button>
-            <button id="syncButton" class="button-secondary" type="button">补齐配置</button>
-            <button id="addButton" class="button-ghost" type="button">新增账号</button>
+          <div class="toolbar-panel">
+            <div class="masthead-actions" role="toolbar" aria-label="主要操作">
+              <button id="refreshButton" class="button-secondary" type="button" data-toolbar-action="refresh">刷新额度</button>
+              <button id="applyButton" class="button-primary" type="button" data-toolbar-action="apply">应用推荐</button>
+              <button id="bootstrapButton" class="button-secondary" type="button" data-toolbar-action="bootstrap">初始化本地库</button>
+              <button id="importPrimaryButton" class="button-secondary" type="button" data-toolbar-action="import">导入号池</button>
+              <button id="addButton" class="button-ghost" type="button" data-toolbar-action="add">新增账号</button>
+              <details id="toolsMenu" class="toolbar-menu" hidden>
+                <summary id="toolsMenuButton" class="button-secondary toolbar-menu-trigger" data-toolbar-action="moreTools">更多工具</summary>
+                <div id="toolsMenuPanel" class="toolbar-menu-panel">
+                  <section class="toolbar-menu-group">
+                    <div class="toolbar-menu-group-label">运行维护</div>
+                    <button id="syncButton" class="toolbar-menu-button" type="button" data-toolbar-action="sync">
+                      <span class="toolbar-menu-button-title">同步配置</span>
+                      <span class="toolbar-menu-button-copy">把本地号池补到 openclaw.json，不切换当前账号</span>
+                    </button>
+                    <button id="rebuildRuntimeButton" class="toolbar-menu-button" type="button" data-toolbar-action="rebuild">
+                      <span class="toolbar-menu-button-title">重建运行文件</span>
+                      <span class="toolbar-menu-button-copy">按本地号池重写 OpenClaw 与 Codex runtime 文件</span>
+                    </button>
+                    <button id="absorbRuntimeButton" class="toolbar-menu-button" type="button" data-toolbar-action="absorb">
+                      <span class="toolbar-menu-button-title">吸收运行数据</span>
+                      <span class="toolbar-menu-button-copy">把当前 OpenClaw runtime 状态显式吸收到本地号池</span>
+                    </button>
+                  </section>
+                  <section class="toolbar-menu-group">
+                    <div class="toolbar-menu-group-label">迁移备份</div>
+                    <button id="exportButton" class="toolbar-menu-button" type="button" data-toolbar-action="export">
+                      <span class="toolbar-menu-button-title">导出号池</span>
+                      <span class="toolbar-menu-button-copy">导出加密 bundle，方便在其他电脑恢复登录状态</span>
+                    </button>
+                    <button id="importButton" class="toolbar-menu-button" type="button" data-toolbar-action="import">
+                      <span class="toolbar-menu-button-title">导入号池</span>
+                      <span class="toolbar-menu-button-copy">先预览再合并导入，不直接覆盖现有本地号池</span>
+                    </button>
+                  </section>
+                </div>
+              </details>
+            </div>
+            <div id="toolbarInlineHint" class="toolbar-inline-hint" aria-live="polite">高频动作留在这里，低频维护操作收进“更多工具”。</div>
+            <section id="toolbarHelpCard" class="toolbar-help-card" aria-live="polite">
+              <div class="toolbar-help-eyebrow">Action Guide</div>
+              <h3 id="toolbarHelpTitle" class="toolbar-help-title">刷新额度</h3>
+              <p id="toolbarHelpDescription" class="toolbar-help-copy">重新读取本地号池与运行文件，拉取额度并重算推荐顺序。</p>
+              <div class="toolbar-help-meta">
+                <div class="toolbar-help-meta-item">
+                  <span class="toolbar-help-meta-label">会改哪里</span>
+                  <span id="toolbarHelpMutates" class="toolbar-help-meta-value">不改动文件，只重新读取状态</span>
+                </div>
+                <div class="toolbar-help-meta-item">
+                  <span class="toolbar-help-meta-label">不会做什么</span>
+                  <span id="toolbarHelpSafe" class="toolbar-help-meta-value">不会切换当前账号，也不会写回配置</span>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
 
@@ -1839,10 +2198,6 @@ export function renderHtml() {
                 </div>
                 <div id="spotlightWindowCapsule" class="spotlight-capsule">重置未知</div>
               </div>
-            </div>
-            <div class="spotlight-actions">
-              <button id="spotlightApplyButton" class="button-primary" type="button">置顶</button>
-              <button id="spotlightRefreshButton" class="button-secondary" type="button">刷新</button>
             </div>
           </section>
 
@@ -1889,6 +2244,9 @@ export function renderHtml() {
             </button>
             <button id="tabOrder" class="tab-button" type="button" data-tab="order" aria-selected="false">
               <span class="tab-button-label">顺序</span>
+            </button>
+            <button id="tabTokenRefresh" class="tab-button" type="button" data-tab="token-refresh" aria-selected="false">
+              <span class="tab-button-label">刷新 Token</span>
             </button>
             <button id="tabSettings" class="tab-button" type="button" data-tab="settings" aria-selected="false">
               <span class="tab-button-label">设置</span>
@@ -1941,27 +2299,82 @@ export function renderHtml() {
             </div>
           </section>
 
+          <section id="tokenRefreshPanel" class="tab-panel" data-tab-panel="token-refresh" hidden>
+            <div class="settings-layout">
+              <section class="card panel">
+                <div class="panel-head">
+                  <div>
+                    <h2>Token 保活</h2>
+                  </div>
+                </div>
+
+                <div class="settings-section">
+                  <button id="tokenRefreshButton" class="button-primary" type="button">立即刷新 Token</button>
+                  <p class="field-note">只刷新 OAuth token 生命周期，不会自动改推荐顺序。</p>
+                </div>
+
+                <div class="settings-section">
+                  <label class="field">
+                    <span class="field-label">Token 定时刷新（秒）</span>
+                    <input id="tokenRefreshIntervalInput" class="input" type="number" min="0" step="1" value="0" />
+                    <span class="field-note">0 关闭。只有页面开着时才会执行。</span>
+                  </label>
+                </div>
+              </section>
+
+              <section class="card panel">
+                <div class="panel-head">
+                  <div>
+                    <h2>保活状态</h2>
+                  </div>
+                </div>
+                <div class="snapshot-grid">
+                  <div class="snapshot-item">
+                    <div class="stat-label">上次尝试</div>
+                    <div id="tokenLastAttemptValue" class="snapshot-value">-</div>
+                  </div>
+                  <div class="snapshot-item">
+                    <div class="stat-label">上次成功</div>
+                    <div id="tokenLastSuccessValue" class="snapshot-value">-</div>
+                  </div>
+                  <div class="snapshot-item">
+                    <div class="stat-label">最近变更</div>
+                    <div id="tokenChangedProfilesValue" class="snapshot-value">-</div>
+                  </div>
+                  <div class="snapshot-item">
+                    <div class="stat-label">下一次计划</div>
+                    <div id="tokenNextRunValue" class="snapshot-value">-</div>
+                  </div>
+                  <div class="snapshot-item">
+                    <div class="stat-label">最近错误</div>
+                    <div id="tokenLastErrorValue" class="snapshot-value">-</div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </section>
+
           <section id="settingsPanel" class="tab-panel" data-tab-panel="settings" hidden>
             <div class="settings-layout">
               <section class="card panel">
                 <div class="panel-head">
                   <div>
-                    <h2>自动化</h2>
+                    <h2>额度自动化</h2>
                   </div>
                 </div>
 
                 <div class="settings-section">
                   <label class="field">
-                    <span class="field-label">自动刷新（秒）</span>
-                    <input id="refreshIntervalInput" class="input" type="number" min="0" step="1" value="0" />
-                    <span class="field-note">0 关闭</span>
+                    <span class="field-label">额度自动刷新（秒）</span>
+                    <input id="quotaRefreshIntervalInput" class="input" type="number" min="0" step="1" value="0" />
+                    <span class="field-note">0 关闭。会刷新额度并重算推荐顺序。</span>
                   </label>
 
                   <label class="toggle">
                     <input id="autoApplyToggle" type="checkbox" />
                     <span>
-                      <strong>自动应用推荐</strong>
-                      <span class="field-note">顺序变化时才调整</span>
+                      <strong>额度刷新后自动应用推荐</strong>
+                      <span class="field-note">只在推荐顺序变化时调整</span>
                     </span>
                   </label>
                 </div>
@@ -1994,8 +2407,16 @@ export function renderHtml() {
                     <div id="agentValue" class="snapshot-value">-</div>
                   </div>
                   <div class="snapshot-item">
-                    <div class="stat-label">账号数据位置</div>
+                    <div class="stat-label">本地号池位置</div>
                     <div id="authValue" class="snapshot-value">-</div>
+                  </div>
+                  <div class="snapshot-item">
+                    <div class="stat-label">OpenClaw auth 位置</div>
+                    <div id="runtimeAuthValue" class="snapshot-value">-</div>
+                  </div>
+                  <div class="snapshot-item">
+                    <div class="stat-label">Codex auth 位置</div>
+                    <div id="codexValue" class="snapshot-value">-</div>
                   </div>
                   <div class="snapshot-item">
                     <div class="stat-label">配置文件位置</div>
@@ -2054,6 +2475,8 @@ export function renderHtml() {
       </div>
     </div>
 
+    <input id="importBundleInput" type="file" accept="application/json,.json" hidden />
+
     <div id="manageModal" class="modal-shell" hidden aria-hidden="true">
       <div class="modal-backdrop" data-manage-modal-close="true"></div>
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="manageModalTitle">
@@ -2107,8 +2530,12 @@ export function renderHtml() {
         manualCodeError: "",
         manualCodeSubmitting: false,
         loginTaskRenderKey: "",
-        refreshTimer: null,
-        refreshIntervalSeconds: 0,
+        loginCompletionMessage: "新增账号完成",
+        quotaRefreshTimer: null,
+        quotaRefreshIntervalSeconds: 0,
+        tokenRefreshTimer: null,
+        tokenRefreshIntervalSeconds: 0,
+        tokenRefreshNextRunAt: null,
         autoApplyRecommended: false,
         usageProxyEnabled: false,
         usageProxyUrl: "",
@@ -2116,9 +2543,12 @@ export function renderHtml() {
         accountsView: "quota",
         manageMode: null,
         manageRow: null,
+        toolbarActionKey: "refresh",
       };
 
-      const REFRESH_INTERVAL_STORAGE_KEY = "codex-auth-dashboard.refresh-interval-seconds";
+      const QUOTA_REFRESH_INTERVAL_STORAGE_KEY = "codex-auth-dashboard.quota-refresh-interval-seconds";
+      const LEGACY_REFRESH_INTERVAL_STORAGE_KEY = "codex-auth-dashboard.refresh-interval-seconds";
+      const TOKEN_REFRESH_INTERVAL_STORAGE_KEY = "codex-auth-dashboard.token-refresh-interval-seconds";
       const AUTO_APPLY_STORAGE_KEY = "codex-auth-dashboard.auto-apply-after-refresh";
       const USAGE_PROXY_ENABLED_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-enabled";
       const USAGE_PROXY_URL_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-url";
@@ -2129,11 +2559,30 @@ export function renderHtml() {
       const flashBanner = document.getElementById("flashBanner");
       const refreshButton = document.getElementById("refreshButton");
       const applyButton = document.getElementById("applyButton");
+      const bootstrapButton = document.getElementById("bootstrapButton");
+      const importPrimaryButton = document.getElementById("importPrimaryButton");
       const syncButton = document.getElementById("syncButton");
+      const rebuildRuntimeButton = document.getElementById("rebuildRuntimeButton");
+      const absorbRuntimeButton = document.getElementById("absorbRuntimeButton");
+      const exportButton = document.getElementById("exportButton");
+      const importButton = document.getElementById("importButton");
       const addButton = document.getElementById("addButton");
-      const spotlightApplyButton = document.getElementById("spotlightApplyButton");
-      const spotlightRefreshButton = document.getElementById("spotlightRefreshButton");
-      const refreshIntervalInput = document.getElementById("refreshIntervalInput");
+      const toolsMenu = document.getElementById("toolsMenu");
+      const toolsMenuButton = document.getElementById("toolsMenuButton");
+      const toolsMenuPanel = document.getElementById("toolsMenuPanel");
+      const toolbarInlineHint = document.getElementById("toolbarInlineHint");
+      const toolbarHelpTitle = document.getElementById("toolbarHelpTitle");
+      const toolbarHelpDescription = document.getElementById("toolbarHelpDescription");
+      const toolbarHelpMutates = document.getElementById("toolbarHelpMutates");
+      const toolbarHelpSafe = document.getElementById("toolbarHelpSafe");
+      const quotaRefreshIntervalInput = document.getElementById("quotaRefreshIntervalInput");
+      const tokenRefreshButton = document.getElementById("tokenRefreshButton");
+      const tokenRefreshIntervalInput = document.getElementById("tokenRefreshIntervalInput");
+      const tokenLastAttemptValue = document.getElementById("tokenLastAttemptValue");
+      const tokenLastSuccessValue = document.getElementById("tokenLastSuccessValue");
+      const tokenChangedProfilesValue = document.getElementById("tokenChangedProfilesValue");
+      const tokenNextRunValue = document.getElementById("tokenNextRunValue");
+      const tokenLastErrorValue = document.getElementById("tokenLastErrorValue");
       const usageProxyUrlInput = document.getElementById("usageProxyUrlInput");
       const autoApplyToggle = document.getElementById("autoApplyToggle");
       const usageProxyToggle = document.getElementById("usageProxyToggle");
@@ -2152,8 +2601,11 @@ export function renderHtml() {
       const nextResetValue = document.getElementById("nextResetValue");
       const agentValue = document.getElementById("agentValue");
       const authValue = document.getElementById("authValue");
+      const runtimeAuthValue = document.getElementById("runtimeAuthValue");
+      const codexValue = document.getElementById("codexValue");
       const configValue = document.getElementById("configValue");
       const timeValue = document.getElementById("timeValue");
+      const importBundleInput = document.getElementById("importBundleInput");
       const alertsGrid = document.getElementById("alertsGrid");
       const tabButtons = Array.from(document.querySelectorAll("[data-tab]"));
       const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
@@ -2188,8 +2640,75 @@ export function renderHtml() {
       const deleteField = document.getElementById("deleteField");
       const manageModalError = document.getElementById("manageModalError");
 
+      const TOOLBAR_ACTIONS = {
+        refresh: {
+          label: "刷新额度",
+          description: "重新拉取额度、读取当前状态，并重算推荐顺序。",
+          mutates: "不会刷新 token，只会重新读取状态与额度",
+          safe: "不会切换当前账号，也不会写回配置",
+        },
+        apply: {
+          label: "应用推荐",
+          description: "把推荐顺序写回本地号池，并导出到 OpenClaw runtime。",
+          mutates: "会更新本地顺序，并导出 OpenClaw runtime",
+          safe: "不会切换 ~/.codex/auth.json",
+        },
+        add: {
+          label: "新增账号",
+          description: "启动新的 OAuth 登录流程，把一个账号加入本地号池。",
+          mutates: "会新增本地 profile，并同步运行文件",
+          safe: "不会覆盖同名账号",
+        },
+        bootstrap: {
+          label: "初始化本地库",
+          description: "第一次使用时，把现有运行文件导入到项目本地号池。",
+          mutates: "会创建 ./.local/auth-store.json",
+          safe: "不会偷偷覆盖已经存在的本地号池",
+        },
+        import: {
+          label: "导入号池",
+          description: "导入加密 bundle，先预览再合并到本地号池。",
+          mutates: "会更新本地号池，并重建运行文件",
+          safe: "不会直接无提示覆盖现有号池",
+        },
+        sync: {
+          label: "同步配置",
+          description: "把本地号池里的 profile 和顺序补到 openclaw.json。",
+          mutates: "会写 openclaw.json",
+          safe: "不会切换当前账号，也不会改 Codex auth",
+        },
+        rebuild: {
+          label: "重建运行文件",
+          description: "按本地号池重新生成 OpenClaw 和 Codex runtime 文件。",
+          mutates: "会重写 auth-profiles.json 和 ~/.codex/auth.json",
+          safe: "不会改动本地号池内容",
+        },
+        absorb: {
+          label: "吸收运行数据",
+          description: "把当前 OpenClaw runtime 的账号、顺序和统计显式吸收到本地号池。",
+          mutates: "会更新本地号池",
+          safe: "不会自动发生，必须手动点",
+        },
+        export: {
+          label: "导出号池",
+          description: "把本地号池导出成一个加密 bundle，方便带到别的电脑导入。",
+          mutates: "不会改动当前号池，只会生成导出文件",
+          safe: "不会把口令保存在本地",
+        },
+        moreTools: {
+          label: "更多工具",
+          description: "低频维护和迁移操作都收在这里，避免主操作区堆满按钮。",
+          mutates: "这里只是展开工具面板",
+          safe: "不会直接执行任何实际操作",
+        },
+      };
+
       function formatTime(ts) {
         if (!ts) return "-";
+        if (typeof ts === "string") {
+          const parsed = Date.parse(ts);
+          return Number.isFinite(parsed) ? new Date(parsed).toLocaleString("zh-CN", { hour12: false }) : "-";
+        }
         const ms = ts > 10_000_000_000 ? ts : ts * 1000;
         return new Date(ms).toLocaleString("zh-CN", { hour12: false });
       }
@@ -2237,15 +2756,15 @@ export function renderHtml() {
         });
       }
 
-      function closeAllProfileMenus(exceptMenu = null) {
-        document.querySelectorAll(".profile-menu[open]").forEach((menu) => {
+      function closeFloatingMenus(exceptMenu = null) {
+        document.querySelectorAll(".profile-menu[open], .toolbar-menu[open]").forEach((menu) => {
           if (menu !== exceptMenu) {
             menu.removeAttribute("open");
           }
         });
       }
 
-      function positionProfileMenu(menu, menuList) {
+      function positionFloatingMenu(menu, menuList) {
         if (!(menu instanceof HTMLElement) || !(menuList instanceof HTMLElement)) return;
 
         // Reset to the default direction before measuring, then flip only when space is not enough.
@@ -2272,6 +2791,34 @@ export function renderHtml() {
         if (spaceRight < menuWidth && spaceLeft > spaceRight) {
           menu.dataset.horizontal = "left";
         }
+      }
+
+      function getToolbarActionMeta(actionKey) {
+        return TOOLBAR_ACTIONS[actionKey] || TOOLBAR_ACTIONS.refresh;
+      }
+
+      function updateToolbarHelp(actionKey) {
+        const meta = getToolbarActionMeta(actionKey);
+        appState.toolbarActionKey = actionKey;
+        toolbarHelpTitle.textContent = meta.label;
+        toolbarHelpDescription.textContent = meta.description;
+        toolbarHelpMutates.textContent = meta.mutates;
+        toolbarHelpSafe.textContent = meta.safe;
+        toolbarInlineHint.textContent = meta.description;
+      }
+
+      function bindToolbarActionHints(target) {
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        const actionKey = target.dataset.toolbarAction;
+        if (!actionKey) {
+          return;
+        }
+        const show = () => updateToolbarHelp(actionKey);
+        target.addEventListener("mouseenter", show);
+        target.addEventListener("focus", show);
+        target.addEventListener("click", show);
       }
 
       function getRemainingPercent(windowData) {
@@ -2433,16 +2980,38 @@ export function renderHtml() {
         flashBanner.textContent = message;
       }
 
-      function clearRefreshTimer() {
-        if (appState.refreshTimer) {
-          window.clearTimeout(appState.refreshTimer);
-          appState.refreshTimer = null;
+      function clearQuotaRefreshTimer() {
+        if (appState.quotaRefreshTimer) {
+          window.clearTimeout(appState.quotaRefreshTimer);
+          appState.quotaRefreshTimer = null;
         }
+      }
+
+      function clearTokenRefreshTimer() {
+        if (appState.tokenRefreshTimer) {
+          window.clearTimeout(appState.tokenRefreshTimer);
+          appState.tokenRefreshTimer = null;
+        }
+        appState.tokenRefreshNextRunAt = null;
+      }
+
+      function renderTokenRefreshStatus(data = appState.data) {
+        const maintenance = data?.maintenance || {};
+        tokenLastAttemptValue.textContent = formatTime(maintenance.lastAttemptAt);
+        tokenLastSuccessValue.textContent = formatTime(maintenance.lastSuccessAt);
+        tokenChangedProfilesValue.textContent = Array.isArray(maintenance.lastChangedProfileIds) && maintenance.lastChangedProfileIds.length > 0
+          ? maintenance.lastChangedProfileIds.length + " 个账号"
+          : "0 个账号";
+        tokenLastErrorValue.textContent = maintenance.lastError || "无";
+        tokenNextRunValue.textContent = appState.tokenRefreshIntervalSeconds > 0 && appState.tokenRefreshNextRunAt
+          ? new Date(appState.tokenRefreshNextRunAt).toLocaleString("zh-CN", { hour12: false })
+          : "已关闭";
       }
 
       function persistAutomationSettings() {
         try {
-          window.localStorage.setItem(REFRESH_INTERVAL_STORAGE_KEY, String(appState.refreshIntervalSeconds));
+          window.localStorage.setItem(QUOTA_REFRESH_INTERVAL_STORAGE_KEY, String(appState.quotaRefreshIntervalSeconds));
+          window.localStorage.setItem(TOKEN_REFRESH_INTERVAL_STORAGE_KEY, String(appState.tokenRefreshIntervalSeconds));
           window.localStorage.setItem(AUTO_APPLY_STORAGE_KEY, String(appState.autoApplyRecommended));
           window.localStorage.setItem(USAGE_PROXY_ENABLED_STORAGE_KEY, String(appState.usageProxyEnabled));
           window.localStorage.setItem(USAGE_PROXY_URL_STORAGE_KEY, appState.usageProxyUrl);
@@ -2454,23 +3023,31 @@ export function renderHtml() {
       }
 
       function syncAutomationControls() {
-        refreshIntervalInput.value = String(appState.refreshIntervalSeconds);
+        quotaRefreshIntervalInput.value = String(appState.quotaRefreshIntervalSeconds);
+        tokenRefreshIntervalInput.value = String(appState.tokenRefreshIntervalSeconds);
         usageProxyUrlInput.value = appState.usageProxyUrl;
         autoApplyToggle.checked = appState.autoApplyRecommended;
         usageProxyToggle.checked = appState.usageProxyEnabled;
+        renderTokenRefreshStatus();
       }
 
       function loadAutomationSettings() {
         try {
-          const storedInterval = Number(window.localStorage.getItem(REFRESH_INTERVAL_STORAGE_KEY));
-          if (Number.isFinite(storedInterval) && storedInterval >= 0) {
-            appState.refreshIntervalSeconds = Math.floor(storedInterval);
+          const storedQuotaInterval = Number(
+            window.localStorage.getItem(QUOTA_REFRESH_INTERVAL_STORAGE_KEY) || window.localStorage.getItem(LEGACY_REFRESH_INTERVAL_STORAGE_KEY),
+          );
+          if (Number.isFinite(storedQuotaInterval) && storedQuotaInterval >= 0) {
+            appState.quotaRefreshIntervalSeconds = Math.floor(storedQuotaInterval);
+          }
+          const storedTokenInterval = Number(window.localStorage.getItem(TOKEN_REFRESH_INTERVAL_STORAGE_KEY));
+          if (Number.isFinite(storedTokenInterval) && storedTokenInterval >= 0) {
+            appState.tokenRefreshIntervalSeconds = Math.floor(storedTokenInterval);
           }
           appState.autoApplyRecommended = window.localStorage.getItem(AUTO_APPLY_STORAGE_KEY) === "true";
           appState.usageProxyEnabled = window.localStorage.getItem(USAGE_PROXY_ENABLED_STORAGE_KEY) === "true";
           appState.usageProxyUrl = window.localStorage.getItem(USAGE_PROXY_URL_STORAGE_KEY) || "";
           const activeTab = window.localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
-          if (activeTab === "accounts" || activeTab === "order" || activeTab === "settings") {
+          if (activeTab === "accounts" || activeTab === "order" || activeTab === "token-refresh" || activeTab === "settings") {
             appState.activeTab = activeTab;
           }
           const accountsView = window.localStorage.getItem(ACCOUNTS_VIEW_STORAGE_KEY);
@@ -2478,7 +3055,8 @@ export function renderHtml() {
             appState.accountsView = accountsView;
           }
         } catch {
-          appState.refreshIntervalSeconds = 0;
+          appState.quotaRefreshIntervalSeconds = 0;
+          appState.tokenRefreshIntervalSeconds = 0;
           appState.autoApplyRecommended = false;
           appState.usageProxyEnabled = false;
           appState.usageProxyUrl = "";
@@ -2499,7 +3077,7 @@ export function renderHtml() {
       }
 
       function setActiveTab(tab) {
-        if (tab !== "accounts" && tab !== "order" && tab !== "settings") {
+        if (tab !== "accounts" && tab !== "order" && tab !== "token-refresh" && tab !== "settings") {
           return;
         }
         appState.activeTab = tab;
@@ -2534,18 +3112,35 @@ export function renderHtml() {
         }
       }
 
-      function scheduleAutoRefresh() {
-        clearRefreshTimer();
-        if (appState.refreshIntervalSeconds <= 0) {
+      function scheduleQuotaRefresh() {
+        clearQuotaRefreshTimer();
+        if (appState.quotaRefreshIntervalSeconds <= 0) {
           return;
         }
-        appState.refreshTimer = window.setTimeout(() => {
+        appState.quotaRefreshTimer = window.setTimeout(() => {
           if (appState.busy) {
-            scheduleAutoRefresh();
+            scheduleQuotaRefresh();
             return;
           }
-          void refreshState("自动刷新完成");
-        }, appState.refreshIntervalSeconds * 1000);
+          void refreshState("额度自动刷新完成");
+        }, appState.quotaRefreshIntervalSeconds * 1000);
+      }
+
+      function scheduleTokenRefresh() {
+        clearTokenRefreshTimer();
+        if (appState.tokenRefreshIntervalSeconds <= 0 || !appState.data?.localStore?.exists) {
+          renderTokenRefreshStatus();
+          return;
+        }
+        appState.tokenRefreshNextRunAt = Date.now() + appState.tokenRefreshIntervalSeconds * 1000;
+        renderTokenRefreshStatus();
+        appState.tokenRefreshTimer = window.setTimeout(() => {
+          if (appState.busy) {
+            scheduleTokenRefresh();
+            return;
+          }
+          void refreshTokenSessions("Token 定时刷新完成");
+        }, appState.tokenRefreshIntervalSeconds * 1000);
       }
 
       function shouldAutoApplyRecommendedOrder(data) {
@@ -2577,21 +3172,87 @@ export function renderHtml() {
         return query ? "/api/state?" + query : "/api/state";
       }
 
+      function setToolbarButtonText(button, actionKey) {
+        if (!(button instanceof HTMLElement)) {
+          return;
+        }
+        const meta = getToolbarActionMeta(actionKey);
+        const title = button.querySelector(".toolbar-menu-button-title");
+        const copy = button.querySelector(".toolbar-menu-button-copy");
+        if (title && copy) {
+          title.textContent = meta.label;
+          return;
+        }
+        button.textContent = meta.label;
+      }
+
+      function renderToolbarState(data) {
+        const storeReady = Boolean(data?.localStore?.exists);
+        document.querySelectorAll("[data-toolbar-action]").forEach((node) => {
+          const actionKey = node instanceof HTMLElement ? node.dataset.toolbarAction : "";
+          if (!actionKey) {
+            return;
+          }
+          const meta = getToolbarActionMeta(actionKey);
+          node.setAttribute("title", meta.description);
+          node.setAttribute("aria-label", meta.label);
+        });
+        applyButton.hidden = !storeReady;
+        addButton.hidden = !storeReady;
+        bootstrapButton.hidden = storeReady;
+        importPrimaryButton.hidden = storeReady;
+        toolsMenu.hidden = !storeReady;
+
+        setToolbarButtonText(refreshButton, "refresh");
+        setToolbarButtonText(applyButton, "apply");
+        setToolbarButtonText(addButton, "add");
+        setToolbarButtonText(bootstrapButton, "bootstrap");
+        setToolbarButtonText(importPrimaryButton, "import");
+        setToolbarButtonText(syncButton, "sync");
+        setToolbarButtonText(rebuildRuntimeButton, "rebuild");
+        setToolbarButtonText(absorbRuntimeButton, "absorb");
+        setToolbarButtonText(exportButton, "export");
+        setToolbarButtonText(importButton, "import");
+        setToolbarButtonText(toolsMenuButton, "moreTools");
+
+        if (!storeReady && appState.toolbarActionKey !== "bootstrap" && appState.toolbarActionKey !== "import") {
+          updateToolbarHelp("bootstrap");
+        }
+        if (storeReady && appState.toolbarActionKey === "bootstrap") {
+          updateToolbarHelp("add");
+        }
+      }
+
       function syncControlState() {
         const loginInProgress = Boolean(appState.loginTaskId);
         const disabled = appState.busy;
+        const storeReady = Boolean(appState.data?.localStore?.exists);
         refreshButton.disabled = disabled;
-        applyButton.disabled = disabled;
-        syncButton.disabled = disabled;
-        addButton.disabled = disabled || loginInProgress;
-        spotlightApplyButton.disabled = disabled;
-        spotlightRefreshButton.disabled = disabled;
+        tokenRefreshButton.disabled = disabled || !storeReady;
+        applyButton.disabled = disabled || !storeReady;
+        bootstrapButton.disabled = disabled || storeReady;
+        importPrimaryButton.disabled = disabled;
+        syncButton.disabled = disabled || !storeReady;
+        rebuildRuntimeButton.disabled = disabled || !storeReady;
+        absorbRuntimeButton.disabled = disabled || !storeReady || !appState.data?.actions?.canAbsorbRuntime;
+        exportButton.disabled = disabled || !storeReady;
+        importButton.disabled = disabled;
+        addButton.disabled = disabled || loginInProgress || !storeReady;
+        toolsMenu.classList.toggle("is-disabled", disabled || !storeReady);
+        if (disabled || !storeReady) {
+          toolsMenu.removeAttribute("open");
+        }
+        quotaRefreshIntervalInput.disabled = disabled;
+        tokenRefreshIntervalInput.disabled = disabled || !storeReady;
+        autoApplyToggle.disabled = disabled;
+        usageProxyToggle.disabled = disabled;
+        usageProxyUrlInput.disabled = disabled;
         addProfileSuffixInput.disabled = disabled || loginInProgress;
         addModalSubmitButton.disabled = disabled || loginInProgress;
         renameProfileIdInput.disabled = disabled || loginInProgress;
         manageModalSubmitButton.disabled = disabled || loginInProgress;
         document.querySelectorAll("[data-action-button]").forEach((button) => {
-          button.disabled = disabled || loginInProgress;
+          button.disabled = button.dataset.lockedDisabled === "true" || disabled || loginInProgress || !storeReady;
         });
       }
 
@@ -2945,14 +3606,14 @@ export function renderHtml() {
         if (!note) {
           return "";
         }
-        if (note.includes("Applying order updates")) {
-          return "应用推荐顺序后，系统会立即按新的账号顺序继续工作。";
+        if (note.includes("Applying order only updates")) {
+          return "应用推荐顺序只会调整 OpenClaw 的实际顺序，不会改写 Codex 当前账号。";
         }
-        if (note.includes("Only auto-selected Codex session overrides")) {
-          return "你手动指定的账号不会被自动改掉。";
+        if (note.includes("Setting a profile as current")) {
+          return "“设为当前”会同时切换 OpenClaw 当前账号和 Codex 当前账号。";
         }
-        if (note.includes("This tool is standalone")) {
-          return "这个面板可以独立查看和管理账号。";
+        if (note.includes("project-local store is the canonical source of truth")) {
+          return "项目本地号池是真源，OpenClaw 和 Codex 文件都只是导出结果。";
         }
         return note;
       }
@@ -2961,8 +3622,11 @@ export function renderHtml() {
         if (!note) {
           return "";
         }
-        if (note.includes("auth-profiles.json was not found")) {
-          return "还没找到账号数据，暂时无法读取账号列表。";
+        if (note.includes("Local auth store was not found")) {
+          return "还没初始化项目本地号池。可以从当前运行文件初始化，或者直接导入加密 bundle。";
+        }
+        if (note.includes("Local auth store is not initialized yet")) {
+          return "本地号池还没初始化，当前不会把运行时文件当真源。";
         }
         if (note.includes("openclaw.json was not found")) {
           return "还没找到 OpenClaw 配置，补齐配置功能暂时不可用。";
@@ -2979,16 +3643,56 @@ export function renderHtml() {
         if (note.includes("openclaw.json auth.order references unknown profiles")) {
           return "顺序里有无法识别的账号，请检查配置: " + note.split(": ").slice(1).join(": ");
         }
-        if (note.includes("auth-profiles.json order omits")) {
-          return "账号顺序里缺少这些账号，建议重新同步: " + note.split(": ").slice(1).join(": ");
+        if (note.includes("Local auth store order omits")) {
+          return "本地号池顺序里缺少这些账号，建议重新同步: " + note.split(": ").slice(1).join(": ");
         }
-        if (note.includes("openclaw.json auth.order differs from auth-profiles.json order")) {
-          return "当前实际顺序和配置里看到的顺序不一致，建议同步一次。";
+        if (note.includes("openclaw.json auth.order differs from the local auth store order")) {
+          return "OpenClaw 配置顺序和本地号池顺序不一致，建议重建运行文件。";
         }
         if (note.includes("Profiles still using :default should be renamed")) {
           return "这些账号名称还比较临时，建议改成更容易识别的名字: " + note.split(": ").slice(1).join(": ");
         }
+        if (note.includes("OpenClaw runtime auth-profiles.json has drifted")) {
+          return "OpenClaw runtime 账号文件已经偏离本地号池，建议重建运行文件。";
+        }
+        if (note.includes("Current ~/.codex/auth.json does not match any stored profile")) {
+          return "当前 Codex 登录还没有纳入这个仓库，所以暂时不能统一切换。";
+        }
+        if (note.includes("Current ~/.codex/auth.json matches multiple stored profiles")) {
+          return "当前 Codex 登录和多个仓库账号重复，系统无法安全自动关联。";
+        }
+        if (note.includes("Current ~/.codex/auth.json has drifted")) {
+          return "当前 Codex auth 和本地号池的目标账号不一致，建议重新设为当前或重建运行文件。";
+        }
+        if (note.includes("Failed to read ~/.codex/auth.json")) {
+          return "读取 Codex 当前登录失败: " + note.split(": ").slice(1).join(": ");
+        }
+        if (note.includes("Failed to read OpenClaw auth-profiles.json")) {
+          return "读取 OpenClaw runtime auth-profiles 失败: " + note.split(": ").slice(1).join(": ");
+        }
         return note;
+      }
+
+      function humanizeCodexStatusReason(reason) {
+        if (!reason) {
+          return "";
+        }
+        if (reason.includes("需要重新登录升级为 OAuth 账号")) {
+          return "需要重新登录升级";
+        }
+        if (reason.includes("缺少 Codex id_token")) {
+          return "缺少 Codex 专属字段";
+        }
+        if (reason.includes("缺少 access token")) {
+          return "缺少 access token";
+        }
+        if (reason.includes("缺少 refresh token")) {
+          return "缺少 refresh token";
+        }
+        if (reason.includes("缺少 accountId")) {
+          return "缺少 accountId";
+        }
+        return reason;
       }
 
       function humanizeLoginStatus(status) {
@@ -3369,6 +4073,15 @@ export function renderHtml() {
           plan.textContent = row.plan;
           secondaryRow.appendChild(plan);
         }
+        const codexPillLabel = row.canLinkCurrentCodex
+          ? "可吸收当前 Codex"
+          : row.codexCompatible
+            ? row.codexCurrent
+              ? "Codex 当前"
+              : "Codex 兼容"
+            : "Codex 需升级";
+        const codexPillTone = row.canLinkCurrentCodex ? "warn" : row.codexCompatible ? "ok" : "info";
+        secondaryRow.appendChild(createInfoPill(codexPillLabel, codexPillTone));
         if (row.expiresAt) {
           const expiry = document.createElement("span");
           expiry.textContent = "到期 " + formatTime(row.expiresAt);
@@ -3382,21 +4095,46 @@ export function renderHtml() {
           errorText.textContent = row.error;
           card.appendChild(errorText);
         }
+        if (!row.codexCompatible && row.codexStatusReason) {
+          const codexHint = document.createElement("div");
+          codexHint.className = "error-text";
+          codexHint.textContent = "Codex 切换不可用：" + humanizeCodexStatusReason(row.codexStatusReason);
+          card.appendChild(codexHint);
+        }
 
         const actions = document.createElement("div");
         actions.className = "profile-actions";
 
-        const pinButton = document.createElement("button");
-        pinButton.type = "button";
-        pinButton.className = isTop ? "button-secondary" : "button-primary";
-        pinButton.textContent = isTop ? "已置顶" : "置顶";
-        pinButton.disabled = isTop || appState.busy;
-        pinButton.dataset.actionButton = "true";
-        pinButton.addEventListener("click", () => {
-          const others = appState.data.currentEffectiveOrder.filter((entry) => entry !== row.profileId);
-          void applyCustomOrder([row.profileId, ...others]);
-        });
-        actions.appendChild(pinButton);
+        const primaryButton = document.createElement("button");
+        primaryButton.type = "button";
+        primaryButton.className = row.isSelectedEverywhere ? "button-secondary" : "button-primary";
+        primaryButton.dataset.actionButton = "true";
+
+        if (row.canLinkCurrentCodex) {
+          primaryButton.textContent = "吸收当前 Codex";
+          primaryButton.disabled = appState.busy;
+          primaryButton.addEventListener("click", () => {
+            void linkCurrentCodex(row);
+          });
+        } else if (!row.codexCompatible) {
+          primaryButton.textContent = "升级登录";
+          primaryButton.disabled = appState.busy;
+          primaryButton.addEventListener("click", () => {
+            void upgradeProfile(row);
+          });
+        } else if (row.isSelectedEverywhere) {
+          primaryButton.textContent = "当前账号";
+          primaryButton.disabled = true;
+          primaryButton.dataset.lockedDisabled = "true";
+        } else {
+          primaryButton.textContent = "设为当前";
+          primaryButton.disabled = appState.busy;
+          primaryButton.addEventListener("click", () => {
+            void switchCurrentProfile(row);
+          });
+        }
+
+        actions.appendChild(primaryButton);
 
         const menu = document.createElement("details");
         menu.className = "profile-menu";
@@ -3450,9 +4188,9 @@ export function renderHtml() {
         menu.appendChild(menuList);
         menu.addEventListener("toggle", () => {
           if (!menu.open) return;
-          closeAllProfileMenus(menu);
+          closeFloatingMenus(menu);
           window.requestAnimationFrame(() => {
-            positionProfileMenu(menu, menuList);
+            positionFloatingMenu(menu, menuList);
           });
         });
         actions.appendChild(menu);
@@ -3525,10 +4263,13 @@ export function renderHtml() {
 
       function render(data) {
         appState.data = data;
+        renderToolbarState(data);
         renderSpotlight(data);
         renderOverviewStats(data);
         agentValue.textContent = data.context.agentId;
-        authValue.textContent = data.context.authStorePath;
+        authValue.textContent = data.context.localAuthStorePath;
+        runtimeAuthValue.textContent = data.context.runtimeAuthStorePath;
+        codexValue.textContent = data.context.codexAuthPath;
         configValue.textContent = data.context.configPath;
         timeValue.textContent = new Date(data.generatedAt).toLocaleString("zh-CN", { hour12: false });
         renderOrder(effectiveOrder, data.currentEffectiveOrder, data.recommendedOrder[0]);
@@ -3536,6 +4277,8 @@ export function renderHtml() {
         renderAlerts(data);
         syncAccountsViewControls();
         renderProfileCards(data);
+        renderTokenRefreshStatus(data);
+        scheduleTokenRefresh();
         syncTabState();
         syncControlState();
       }
@@ -3556,29 +4299,79 @@ export function renderHtml() {
         return data;
       }
 
-      async function refreshState(okMessage = "刷新完成") {
-        clearRefreshTimer();
-        setBusy(true, "正在刷新数据...", "info");
+      async function loadStateData() {
+        const response = await fetch(buildStateUrl());
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "load failed");
+        }
+        return data;
+      }
+
+      async function refreshState(okMessage = "额度刷新完成") {
+        clearQuotaRefreshTimer();
+        setBusy(true, "正在刷新额度与排序...", "info");
         try {
-          const response = await fetch(buildStateUrl());
-          const data = await response.json();
-          if (!response.ok) {
-            throw new Error(data.error || "load failed");
-          }
+          const data = await loadStateData();
           render(data);
           if (shouldAutoApplyRecommendedOrder(data)) {
             setFlash("正在自动应用推荐顺序...", "info");
-            const nextState = await postJson("/api/apply-order", { order: data.recommendedOrder });
+            const nextState = await postJson("/api/apply-order", {
+              order: data.recommendedOrder,
+              syncCodexSelection: true,
+            });
             render(nextState);
-            setBusy(false, okMessage === "自动刷新完成" ? "自动刷新后已应用推荐顺序" : "刷新后已应用推荐顺序", "success");
+            const fallbackMessage = okMessage === "额度自动刷新完成"
+              ? "额度自动刷新后已应用推荐顺序"
+              : "额度刷新后已应用推荐顺序";
+            setBusy(false, getApplyResultMessage(nextState.applyResult, fallbackMessage, {
+              updatedMessage: okMessage === "额度自动刷新完成"
+                ? "额度自动刷新后已应用推荐顺序，Codex 当前账号已同步"
+                : "额度刷新后已应用推荐顺序，Codex 当前账号已同步",
+              skippedPrefix: fallbackMessage,
+            }), "success");
           } else {
             setBusy(false, okMessage, "success");
           }
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         } finally {
-          scheduleAutoRefresh();
+          scheduleQuotaRefresh();
         }
+      }
+
+      async function refreshTokenSessions(okMessage = "Token 刷新完成") {
+        clearTokenRefreshTimer();
+        setBusy(true, "正在刷新 Token 有效期...", "info");
+        try {
+          const result = await postJson("/api/keepalive/run");
+          if (result.state) {
+            render(result.state);
+          } else {
+            render(await loadStateData());
+          }
+          const failedCount = Array.isArray(result.failedProfiles) ? result.failedProfiles.length : 0;
+          if (failedCount > 0) {
+            setBusy(false, okMessage + "，但有 " + failedCount + " 个账号失败", "warn");
+          } else {
+            setBusy(false, okMessage, "success");
+          }
+        } catch (error) {
+          setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        } finally {
+          scheduleTokenRefresh();
+        }
+      }
+
+      function getApplyResultMessage(result, fallbackMessage, options = {}) {
+        if (!result || !result.codexSelectionAttempted) {
+          return fallbackMessage;
+        }
+        if (result.codexSelectionUpdated) {
+          return options.updatedMessage || "推荐顺序已应用，Codex 当前账号已同步";
+        }
+        const suffix = result.codexSelectionSkippedReason ? "，但 Codex 未同步：" + result.codexSelectionSkippedReason : "";
+        return (options.skippedPrefix || fallbackMessage) + suffix;
       }
 
       async function applyCustomOrder(order) {
@@ -3586,7 +4379,7 @@ export function renderHtml() {
         try {
           const data = await postJson("/api/apply-order", { order });
           render(data);
-          setBusy(false, "顺序已更新，推荐结果已经生效", "success");
+          setBusy(false, "顺序已更新，仅影响 OpenClaw 运行顺序", "success");
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }
@@ -3597,7 +4390,20 @@ export function renderHtml() {
           setFlash("当前没有可应用的推荐顺序。", "warn");
           return;
         }
-        await applyCustomOrder(appState.data.recommendedOrder);
+        setBusy(true, "正在应用推荐顺序...", "info");
+        try {
+          const data = await postJson("/api/apply-order", {
+            order: appState.data.recommendedOrder,
+            syncCodexSelection: true,
+          });
+          render(data);
+          setBusy(false, getApplyResultMessage(data.applyResult, "推荐顺序已应用", {
+            updatedMessage: "推荐顺序已应用，Codex 当前账号已同步",
+            skippedPrefix: "推荐顺序已应用",
+          }), "success");
+        } catch (error) {
+          setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        }
       }
 
       async function syncConfig() {
@@ -3606,6 +4412,147 @@ export function renderHtml() {
           const data = await postJson("/api/sync-config");
           render(data);
           setBusy(false, "缺失配置已补齐", "success");
+        } catch (error) {
+          setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        }
+      }
+
+      function downloadJsonFile(fileName, value) {
+        const blob = new Blob([JSON.stringify(value, null, 2) + "\n"], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      function readTextFile(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+          reader.onerror = () => reject(new Error("读取文件失败"));
+          reader.readAsText(file);
+        });
+      }
+
+      async function bootstrapLocalStore() {
+        setBusy(true, "正在初始化本地号池...", "info");
+        try {
+          const data = await postJson("/api/bootstrap-local-store");
+          render(data);
+          setBusy(false, "本地号池已初始化", "success");
+        } catch (error) {
+          setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        }
+      }
+
+      async function rebuildRuntimeFiles() {
+        setBusy(true, "正在重建运行文件...", "info");
+        try {
+          const data = await postJson("/api/rebuild-runtime");
+          render(data);
+          setBusy(false, "运行文件已按本地号池重建", "success");
+        } catch (error) {
+          setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        }
+      }
+
+      async function absorbOpenClawRuntime() {
+        setBusy(true, "正在吸收 OpenClaw runtime...", "info");
+        try {
+          const data = await postJson("/api/absorb-openclaw-runtime");
+          render(data);
+          setBusy(false, "OpenClaw runtime 已吸收到本地号池", "success");
+        } catch (error) {
+          setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        }
+      }
+
+      async function exportBundleData() {
+        const passphrase = window.prompt("输入导出口令。这个口令不会保存在本地，只用于加密导出包。", "");
+        if (passphrase == null) {
+          return;
+        }
+
+        setBusy(true, "正在导出加密号池...", "info");
+        try {
+          const data = await postJson("/api/export-bundle", { passphrase });
+          downloadJsonFile(data.fileName || "codex-auth-bundle.json", data.bundle);
+          if (data.state) {
+            render(data.state);
+          }
+          setBusy(false, "加密号池已导出", "success");
+        } catch (error) {
+          setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        }
+      }
+
+      async function importBundleData(file) {
+        const bundle = await readTextFile(file);
+        const passphrase = window.prompt("输入导入包口令。", "");
+        if (passphrase == null) {
+          return;
+        }
+
+        setBusy(true, "正在预览导入结果...", "info");
+        try {
+          const previewResponse = await postJson("/api/import-bundle/preview", { bundle, passphrase });
+          if (previewResponse.state) {
+            render(previewResponse.state);
+          }
+
+          const summary = previewResponse.preview?.summary || {};
+          const actions = Array.isArray(previewResponse.preview?.actions) ? previewResponse.preview.actions : [];
+          const lines = [
+            "将导入 " + String(summary.total || 0) + " 个账号动作",
+            "新增: " + String(summary.add || 0),
+            "更新: " + String(summary.update || 0),
+            "改名导入: " + String(summary["renamed-import"] || 0),
+            "跳过: " + String(summary.skip || 0),
+          ];
+          actions.slice(0, 12).forEach((action) => {
+            lines.push(action.type + ": " + action.sourceProfileId + " -> " + action.targetProfileId);
+          });
+          if (actions.length > 12) {
+            lines.push("… 其余 " + String(actions.length - 12) + " 项请按汇总理解");
+          }
+
+          if (!window.confirm(lines.join("\n") + "\n\n确认执行导入？")) {
+            setBusy(false, "已取消导入", "warn");
+            return;
+          }
+
+          setBusy(true, "正在导入加密号池...", "info");
+          const data = await postJson("/api/import-bundle/commit", { bundle, passphrase });
+          render(data);
+          setBusy(false, "号池导入完成", "success");
+        } catch (error) {
+          setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        } finally {
+          importBundleInput.value = "";
+        }
+      }
+
+      async function switchCurrentProfile(row) {
+        setBusy(true, "正在切换当前账号...", "info");
+        try {
+          const data = await postJson("/api/switch-profile", { profileId: row.profileId });
+          render(data);
+          setBusy(false, "当前账号已切换", "success");
+        } catch (error) {
+          setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        }
+      }
+
+      async function linkCurrentCodex(row) {
+        setBusy(true, "正在吸收当前 Codex 凭据...", "info");
+        try {
+          const data = await postJson("/api/link-current-codex", { profileId: row.profileId });
+          render(data);
+          setBusy(false, "当前 Codex 凭据已吸收", "success");
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }
@@ -3694,7 +4641,7 @@ export function renderHtml() {
               appState.popup = null;
               syncControlState();
               renderLoginTask(task);
-              await refreshState("新增账号完成");
+              await refreshState(appState.loginCompletionMessage || "新增账号完成");
               return;
             }
 
@@ -3707,7 +4654,7 @@ export function renderHtml() {
               }
               appState.popup = null;
               syncControlState();
-              setBusy(false, task.error || "新增账号失败", "danger");
+              setBusy(false, task.error || "OAuth 登录失败", "danger");
               return;
             }
 
@@ -3717,6 +4664,36 @@ export function renderHtml() {
           appState.loginTaskId = null;
           appState.manualCodeSubmitting = false;
           syncControlState();
+          setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        }
+      }
+
+      async function startLogin(profileId, intent, messages) {
+        if (appState.loginTaskId) {
+          throw new Error("当前已有一个 OAuth 登录流程在进行中，请先完成它。");
+        }
+
+        if (appState.popup && !appState.popup.closed) {
+          appState.popup.close();
+        }
+        appState.popup = window.open("about:blank", "_blank");
+        appState.manualCodeDraft = "";
+        appState.manualCodeError = "";
+        appState.manualCodeSubmitting = false;
+        appState.loginTaskRenderKey = "";
+        appState.loginCompletionMessage = messages.success;
+        setBusy(true, messages.start, "info");
+
+        try {
+          const task = await postJson("/api/login/start", { profileId, intent });
+          appState.loginTaskId = task.taskId;
+          appState.loginTask = task;
+          syncControlState();
+          renderLoginTask(task);
+          maybeNavigatePopup(task.authUrl);
+          setBusy(false, messages.waiting, "info");
+          void pollLogin(task.taskId);
+        } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }
       }
@@ -3735,26 +4712,20 @@ export function renderHtml() {
         }
 
         closeAddAccountModal();
+        await startLogin(profileId, "create", {
+          start: "正在启动 OAuth 登录...",
+          waiting: "等待完成 OAuth 登录...",
+          success: "新增账号完成",
+        });
+      }
 
-        if (appState.popup && !appState.popup.closed) {
-          appState.popup.close();
-        }
-        appState.popup = window.open("about:blank", "_blank");
-        appState.manualCodeDraft = "";
-        appState.manualCodeError = "";
-        appState.manualCodeSubmitting = false;
-        appState.loginTaskRenderKey = "";
-        setBusy(true, "正在启动 OAuth 登录...", "info");
-
+      async function upgradeProfile(row) {
         try {
-          const task = await postJson("/api/login/start", { profileId });
-          appState.loginTaskId = task.taskId;
-          appState.loginTask = task;
-          syncControlState();
-          renderLoginTask(task);
-          maybeNavigatePopup(task.authUrl);
-          setBusy(false, "等待完成 OAuth 登录...", "info");
-          void pollLogin(task.taskId);
+          await startLogin(row.profileId, "upgrade", {
+            start: "正在启动账号升级...",
+            waiting: "等待完成账号升级...",
+            success: "账号升级完成",
+          });
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }
@@ -3808,20 +4779,29 @@ export function renderHtml() {
         }
       }
 
-      refreshIntervalInput.addEventListener("change", () => {
-        const nextInterval = Math.max(0, Math.floor(Number(refreshIntervalInput.value) || 0));
-        appState.refreshIntervalSeconds = nextInterval;
+      quotaRefreshIntervalInput.addEventListener("change", () => {
+        const nextInterval = Math.max(0, Math.floor(Number(quotaRefreshIntervalInput.value) || 0));
+        appState.quotaRefreshIntervalSeconds = nextInterval;
         syncAutomationControls();
         persistAutomationSettings();
-        scheduleAutoRefresh();
-        setFlash(nextInterval > 0 ? "已设置每 " + nextInterval + " 秒自动刷新" : "已关闭自动刷新", "info");
+        scheduleQuotaRefresh();
+        setFlash(nextInterval > 0 ? "已设置每 " + nextInterval + " 秒自动刷新额度" : "已关闭额度自动刷新", "info");
+      });
+
+      tokenRefreshIntervalInput.addEventListener("change", () => {
+        const nextInterval = Math.max(0, Math.floor(Number(tokenRefreshIntervalInput.value) || 0));
+        appState.tokenRefreshIntervalSeconds = nextInterval;
+        syncAutomationControls();
+        persistAutomationSettings();
+        scheduleTokenRefresh();
+        setFlash(nextInterval > 0 ? "已设置每 " + nextInterval + " 秒定时刷新 Token" : "已关闭 Token 定时刷新", "info");
       });
 
       autoApplyToggle.addEventListener("change", () => {
         appState.autoApplyRecommended = autoApplyToggle.checked;
         persistAutomationSettings();
         setFlash(
-          appState.autoApplyRecommended ? "已开启刷新后自动应用推荐顺序" : "已关闭刷新后自动应用推荐顺序",
+          appState.autoApplyRecommended ? "已开启额度刷新后自动应用推荐顺序" : "已关闭额度刷新后自动应用推荐顺序",
           "info",
         );
       });
@@ -3882,16 +4862,36 @@ export function renderHtml() {
         void submitManageModal();
       });
 
-      document.addEventListener("click", (event) => {
-        if (event.target instanceof Element && event.target.closest(".profile-menu")) {
+      toolsMenu.addEventListener("toggle", () => {
+        if (!toolsMenu.open) {
           return;
         }
-        closeAllProfileMenus();
+        closeFloatingMenus(toolsMenu);
+        window.requestAnimationFrame(() => {
+          positionFloatingMenu(toolsMenu, toolsMenuPanel);
+        });
+      });
+
+      toolsMenuButton.addEventListener("click", (event) => {
+        if (toolsMenu.classList.contains("is-disabled")) {
+          event.preventDefault();
+        }
+      });
+
+      document.querySelectorAll("[data-toolbar-action]").forEach((node) => {
+        bindToolbarActionHints(node);
+      });
+
+      document.addEventListener("click", (event) => {
+        if (event.target instanceof Element && event.target.closest(".profile-menu, .toolbar-menu")) {
+          return;
+        }
+        closeFloatingMenus();
       });
 
       document.addEventListener("keydown", (event) => {
         if (event.key !== "Escape") return;
-        closeAllProfileMenus();
+        closeFloatingMenus();
         if (!manageModal.hidden) {
           closeManageModal();
           return;
@@ -3904,27 +4904,54 @@ export function renderHtml() {
       refreshButton.addEventListener("click", () => {
         void refreshState();
       });
+      tokenRefreshButton.addEventListener("click", () => {
+        void refreshTokenSessions();
+      });
       applyButton.addEventListener("click", () => {
         void applyRecommendedOrder();
       });
+      bootstrapButton.addEventListener("click", () => {
+        void bootstrapLocalStore();
+      });
+      importPrimaryButton.addEventListener("click", () => {
+        importBundleInput.click();
+      });
       syncButton.addEventListener("click", () => {
+        toolsMenu.removeAttribute("open");
         void syncConfig();
       });
+      rebuildRuntimeButton.addEventListener("click", () => {
+        toolsMenu.removeAttribute("open");
+        void rebuildRuntimeFiles();
+      });
+      absorbRuntimeButton.addEventListener("click", () => {
+        toolsMenu.removeAttribute("open");
+        void absorbOpenClawRuntime();
+      });
+      exportButton.addEventListener("click", () => {
+        toolsMenu.removeAttribute("open");
+        void exportBundleData();
+      });
+      importButton.addEventListener("click", () => {
+        toolsMenu.removeAttribute("open");
+        importBundleInput.click();
+      });
       addButton.addEventListener("click", openAddAccountModal);
-      spotlightApplyButton.addEventListener("click", () => {
-        void applyRecommendedOrder();
-      });
-      spotlightRefreshButton.addEventListener("click", () => {
-        void refreshState();
-      });
       accountsViewQuotaButton.addEventListener("click", () => {
         setAccountsView("quota");
       });
       accountsViewGroupedButton.addEventListener("click", () => {
         setAccountsView("grouped");
       });
+      importBundleInput.addEventListener("change", (event) => {
+        const file = event.target instanceof HTMLInputElement ? event.target.files?.[0] : null;
+        if (file) {
+          void importBundleData(file);
+        }
+      });
 
       loadAutomationSettings();
+      updateToolbarHelp(appState.toolbarActionKey);
       syncTabState();
       refreshState();
       setInterval(updateCountdowns, 1000);

@@ -1,4 +1,10 @@
-import { AUTH_STORE_VERSION, CODEX_PROVIDER } from "./constants.js";
+import {
+  CODEX_PROVIDER,
+  LOCAL_AUTH_STORE_VERSION,
+  LOCAL_STORE_KIND,
+  RUNTIME_AUTH_STORE_VERSION,
+} from "./constants.js";
+import { normalizeCodexAuthMetadata } from "./codex-cli-auth.js";
 import { readJsonObject, writeJsonFileAtomic } from "./json-files.js";
 import { dedupeStrings, isRecord } from "./utils.js";
 
@@ -35,9 +41,63 @@ function normalizeLastGood(value) {
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
+function normalizeProfiles(value) {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const profiles = {};
+  for (const [profileId, credential] of Object.entries(value)) {
+    if (!isRecord(credential)) {
+      continue;
+    }
+
+    const nextCredential = { ...credential };
+    if (nextCredential.provider === CODEX_PROVIDER) {
+      const codexAuth = normalizeCodexAuthMetadata(nextCredential.codexAuth);
+      if (codexAuth) {
+        nextCredential.codexAuth = codexAuth;
+      } else {
+        delete nextCredential.codexAuth;
+      }
+    }
+
+    profiles[profileId] = nextCredential;
+  }
+
+  return profiles;
+}
+
+function normalizeMaintenance(value) {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const changedProfileIds = asStringArray(value.lastChangedProfileIds);
+  const maintenance = {
+    lastAttemptAt: typeof value.lastAttemptAt === "string" && value.lastAttemptAt.trim()
+      ? value.lastAttemptAt
+      : null,
+    lastSuccessAt: typeof value.lastSuccessAt === "string" && value.lastSuccessAt.trim()
+      ? value.lastSuccessAt
+      : null,
+    lastError: typeof value.lastError === "string" && value.lastError.trim()
+      ? value.lastError
+      : null,
+    lastChangedProfileIds: changedProfileIds,
+  };
+
+  if (!maintenance.lastAttemptAt && !maintenance.lastSuccessAt && !maintenance.lastError && changedProfileIds.length === 0) {
+    return undefined;
+  }
+
+  return maintenance;
+}
+
 export function createEmptyAuthStore() {
   return {
-    version: AUTH_STORE_VERSION,
+    kind: LOCAL_STORE_KIND,
+    version: LOCAL_AUTH_STORE_VERSION,
     profiles: {},
   };
 }
@@ -45,22 +105,74 @@ export function createEmptyAuthStore() {
 export function readAuthStore(authStorePath) {
   const raw = readJsonObject(authStorePath, createEmptyAuthStore());
   return {
-    version: typeof raw.version === "number" ? raw.version : AUTH_STORE_VERSION,
-    profiles: isRecord(raw.profiles) ? raw.profiles : {},
+    kind: raw.kind === LOCAL_STORE_KIND ? raw.kind : undefined,
+    version: typeof raw.version === "number"
+      ? raw.version
+      : raw.kind === LOCAL_STORE_KIND
+        ? LOCAL_AUTH_STORE_VERSION
+        : RUNTIME_AUTH_STORE_VERSION,
+    profiles: normalizeProfiles(raw.profiles),
     order: normalizeOrderRecord(raw.order),
     lastGood: normalizeLastGood(raw.lastGood),
     usageStats: isRecord(raw.usageStats) ? raw.usageStats : undefined,
+    maintenance: raw.kind === LOCAL_STORE_KIND ? normalizeMaintenance(raw.maintenance) : undefined,
   };
 }
 
 export function writeAuthStore(authStorePath, store) {
   writeJsonFileAtomic(authStorePath, {
-    version: typeof store.version === "number" ? store.version : AUTH_STORE_VERSION,
+    kind: LOCAL_STORE_KIND,
+    version: LOCAL_AUTH_STORE_VERSION,
     profiles: isRecord(store.profiles) ? store.profiles : {},
     order: store.order,
     lastGood: store.lastGood,
     usageStats: store.usageStats,
+    maintenance: normalizeMaintenance(store.maintenance),
   });
+}
+
+function sanitizeCredentialForRuntime(credential) {
+  if (!isRecord(credential)) {
+    return credential;
+  }
+
+  const { codexAuth, ...runtimeCredential } = credential;
+  return runtimeCredential;
+}
+
+export function buildLocalAuthStore(store, options = {}) {
+  const includeMaintenance = options.includeMaintenance !== false;
+
+  return {
+    kind: LOCAL_STORE_KIND,
+    version: LOCAL_AUTH_STORE_VERSION,
+    profiles: normalizeProfiles(store?.profiles),
+    order: normalizeOrderRecord(store?.order),
+    lastGood: normalizeLastGood(store?.lastGood),
+    usageStats: isRecord(store?.usageStats) ? store.usageStats : undefined,
+    maintenance: includeMaintenance ? normalizeMaintenance(store?.maintenance) : undefined,
+  };
+}
+
+export function buildRuntimeAuthStore(store) {
+  const localStore = buildLocalAuthStore(store);
+  const runtimeProfiles = {};
+
+  for (const [profileId, credential] of Object.entries(localStore.profiles)) {
+    runtimeProfiles[profileId] = sanitizeCredentialForRuntime(credential);
+  }
+
+  return {
+    version: RUNTIME_AUTH_STORE_VERSION,
+    profiles: runtimeProfiles,
+    order: localStore.order,
+    lastGood: localStore.lastGood,
+    usageStats: localStore.usageStats,
+  };
+}
+
+export function writeRuntimeAuthStore(authStorePath, store) {
+  writeJsonFileAtomic(authStorePath, buildRuntimeAuthStore(store));
 }
 
 export function listCodexProfiles(store) {

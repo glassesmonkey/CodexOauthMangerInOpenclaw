@@ -134,14 +134,14 @@ export function buildConfigAudit({ runtimeProfileIds, storedOrder, configProfile
 export function buildWarnings({ rows, audit, context }) {
   const warnings = [];
 
-  if (!context.authStoreExists) {
-    warnings.push("auth-profiles.json was not found at the resolved path yet.");
+  if (!context.localAuthStoreExists) {
+    warnings.push("Local auth store was not found at the resolved path yet.");
   }
   if (!context.configExists) {
     warnings.push("openclaw.json was not found at the resolved path.");
   }
-  if (rows.length === 0) {
-    warnings.push("No openai-codex profiles were found in auth-profiles.json.");
+  if (context.localAuthStoreExists && rows.length === 0) {
+    warnings.push("No openai-codex profiles were found in the local auth store.");
   }
   if (audit.missingConfigProfiles.length > 0) {
     warnings.push(`openclaw.json auth.profiles is missing: ${audit.missingConfigProfiles.join(", ")}`);
@@ -153,10 +153,10 @@ export function buildWarnings({ rows, audit, context }) {
     warnings.push(`openclaw.json auth.order references unknown profiles: ${audit.extraConfigOrderProfiles.join(", ")}`);
   }
   if (audit.missingStoredOrderProfiles.length > 0) {
-    warnings.push(`auth-profiles.json order omits: ${audit.missingStoredOrderProfiles.join(", ")}`);
+    warnings.push(`Local auth store order omits: ${audit.missingStoredOrderProfiles.join(", ")}`);
   }
   if (audit.orderMismatch) {
-    warnings.push("openclaw.json auth.order differs from auth-profiles.json order; runtime uses auth-profiles.json.");
+    warnings.push("openclaw.json auth.order differs from the local auth store order; runtime export follows the local store.");
   }
 
   const defaultNames = rows

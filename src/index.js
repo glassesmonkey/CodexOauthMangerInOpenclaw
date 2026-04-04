@@ -21,6 +21,11 @@ export function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--local-state-dir" && next) {
+      args.localStateDir = next.trim();
+      index += 1;
+      continue;
+    }
     if (arg === "--config" && next) {
       args.configPath = next.trim();
       index += 1;
@@ -33,6 +38,11 @@ export function parseArgs(argv) {
     }
     if (arg === "--agent-dir" && next) {
       args.agentDir = next.trim();
+      index += 1;
+      continue;
+    }
+    if (arg === "--codex-auth" && next) {
+      args.codexAuthPath = next.trim();
       index += 1;
       continue;
     }
@@ -93,8 +103,10 @@ export async function main() {
   console.log("Codex Auth Dashboard ready");
   console.log(`URL: ${url}`);
   console.log(`Agent: ${context.agentId}`);
-  console.log(`Auth store: ${context.authStorePath}`);
+  console.log(`Local store: ${context.localAuthStorePath}`);
+  console.log(`OpenClaw runtime auth: ${context.runtimeAuthStorePath}`);
   console.log(`Config: ${context.configPath}`);
+  console.log(`Codex auth: ${context.codexAuthPath}`);
 
   if (args.open) {
     await openBrowser(url);

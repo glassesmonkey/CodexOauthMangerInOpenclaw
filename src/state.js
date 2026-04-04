@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import net from "node:net";
+import path from "node:path";
 import { CODEX_PROVIDER } from "./constants.js";
 import {
   applyOrderToAuthStore,
+  buildLocalAuthStore,
+  buildRuntimeAuthStore,
   computeEffectiveOrder,
   deleteProfileFromAuthStore,
   getStoredOrder,
@@ -11,29 +15,40 @@ import {
   renameProfileInAuthStore,
   upsertProfileCredential,
   writeAuthStore,
+  writeRuntimeAuthStore,
 } from "./auth-store.js";
+import { createEncryptedExportBundle, readEncryptedExportBundle } from "./auth-bundle.js";
+import {
+  buildCodexAuthFile,
+  codexAuthExactlyMatchesCredential,
+  getCodexCompatibilityIssue,
+  isCodexCompatibleCredential,
+  mergeCodexAuthIntoCredential,
+  readCodexAuthFile,
+  writeCodexAuthFile,
+} from "./codex-cli-auth.js";
 import { fetchCodexUsage } from "./codex-api.js";
 import {
+  buildStoredCodexCredential,
   enrichOpenAICodexCredential,
   loginWithCodex,
   normalizeManualAuthorizationInput,
   resolveCredentialToken,
 } from "./codex-auth.js";
 import {
-  deleteProfileFromConfig,
   getConfigCodexOrder,
   getConfigCodexProfiles,
   readOpenClawConfig,
-  renameProfileInConfig,
   syncCodexIntoConfig,
   touchOpenClawConfig,
   writeOpenClawConfig,
 } from "./config-store.js";
 import { withFileLock } from "./file-lock.js";
-import { recommendProfileOrder, buildConfigAudit, buildWarnings } from "./order.js";
+import { readJsonFile } from "./json-files.js";
+import { buildConfigAudit, buildWarnings, recommendProfileOrder } from "./order.js";
 import { resolvePaths } from "./paths.js";
 import { clearAutoAuthProfileOverrides, readSessionStore, writeSessionStore } from "./session-store.js";
-import { toErrorMessage } from "./utils.js";
+import { dedupeStrings, isRecord, toErrorMessage } from "./utils.js";
 
 function resolveAccountId(credential) {
   if (typeof credential?.accountId === "string" && credential.accountId.trim()) {
@@ -61,23 +76,512 @@ function resolveExpiresAt(credential) {
     : null;
 }
 
+function normalizeEmail(email) {
+  return typeof email === "string" && email.trim() ? email.trim().toLowerCase() : null;
+}
+
+function serializeComparable(value) {
+  return JSON.stringify(value ?? null);
+}
+
+function getPreferredOrder(store, configOrder = []) {
+  return getStoredOrder(store).length > 0
+    ? getStoredOrder(store)
+    : computeEffectiveOrder(store, configOrder);
+}
+
+function getSelectedProfileId(store, configOrder = []) {
+  return getPreferredOrder(store, configOrder)[0] || null;
+}
+
+function ensureLocalStoreInitialized(context) {
+  if (!context.localAuthStoreExists) {
+    throw new Error("Local auth store is not initialized yet. Initialize or import a bundle first.");
+  }
+}
+
+function readLocalAuthStore(context) {
+  ensureLocalStoreInitialized(context);
+  return readAuthStore(context.localAuthStorePath);
+}
+
+function readRuntimeAuthStore(context) {
+  return context.runtimeAuthStoreExists
+    ? readAuthStore(context.runtimeAuthStorePath)
+    : buildLocalAuthStore({});
+}
+
+function readCodexAuthRaw(filePath) {
+  return readJsonFile(filePath, null);
+}
+
+function createEmptyMaintenance() {
+  return {
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastError: null,
+    lastChangedProfileIds: [],
+  };
+}
+
+function buildMaintenanceSummary(store) {
+  return {
+    ...createEmptyMaintenance(),
+    ...(isRecord(store?.maintenance) ? store.maintenance : {}),
+    lastChangedProfileIds: Array.isArray(store?.maintenance?.lastChangedProfileIds)
+      ? store.maintenance.lastChangedProfileIds.filter((entry) => typeof entry === "string" && entry.trim())
+      : [],
+  };
+}
+
+function summarizeFailedProfiles(failedProfiles) {
+  if (!Array.isArray(failedProfiles) || failedProfiles.length === 0) {
+    return null;
+  }
+  if (failedProfiles.length === 1) {
+    return `${failedProfiles[0].profileId}: ${failedProfiles[0].error}`;
+  }
+  return `${failedProfiles.length} profiles failed, latest: ${failedProfiles.at(-1).profileId}: ${failedProfiles.at(-1).error}`;
+}
+
+function applyMaintenanceUpdate(store, maintenance) {
+  const next = buildLocalAuthStore(store);
+  const updated = {
+    ...createEmptyMaintenance(),
+    ...buildMaintenanceSummary(next),
+    ...(isRecord(maintenance) ? maintenance : {}),
+    lastChangedProfileIds: Array.isArray(maintenance?.lastChangedProfileIds)
+      ? dedupeStrings(maintenance.lastChangedProfileIds)
+      : buildMaintenanceSummary(next).lastChangedProfileIds,
+  };
+
+  next.maintenance = updated.lastAttemptAt || updated.lastSuccessAt || updated.lastError || updated.lastChangedProfileIds.length > 0
+    ? updated
+    : undefined;
+  return next;
+}
+
+function createApplyResult(overrides = {}) {
+  return {
+    codexSelectionAttempted: false,
+    codexSelectionUpdated: false,
+    codexSelectionProfileId: null,
+    codexSelectionSkippedReason: null,
+    ...overrides,
+  };
+}
+
+function resolveUsageToken(credential) {
+  if (credential?.type === "oauth") {
+    if (typeof credential.access !== "string" || !credential.access.trim()) {
+      throw new Error("OAuth profile is missing access token");
+    }
+    return credential.access;
+  }
+
+  if (credential?.type === "token") {
+    if (typeof credential.token !== "string" || !credential.token.trim()) {
+      throw new Error("Token profile is missing bearer token");
+    }
+    return credential.token;
+  }
+
+  throw new Error(`Unsupported credential type: ${credential?.type ?? "unknown"}`);
+}
+
 function createNotes() {
   return [
-    "Applying order updates auth-profiles.json, touches openclaw.json to trigger gateway hot reload, and clears auto-selected Codex session overrides that still point at older profiles.",
-    "Only auto-selected Codex session overrides are cleared. Explicit user-selected session auth profiles are left unchanged.",
-    "This tool is standalone. It reads and writes OpenClaw JSON files directly but does not import OpenClaw project code.",
+    "The project-local store is the canonical source of truth. OpenClaw auth-profiles.json and ~/.codex/auth.json are generated runtime files.",
+    "Quota refresh and token keepalive are separate flows: quota refresh reloads usage and ranking, while token keepalive only renews OAuth credentials.",
+    "Applying order only updates the local store and OpenClaw runtime order. It does not switch ~/.codex/auth.json.",
+    "Setting a profile as current writes both the OpenClaw runtime files and ~/.codex/auth.json, but only for Codex-compatible OAuth profiles.",
   ];
+}
+
+function inspectCodexAuthFile(context, profiles, expectedCredential = null) {
+  let auth = null;
+  let raw = null;
+  let error = null;
+
+  try {
+    raw = readCodexAuthRaw(context.codexAuthPath);
+    auth = readCodexAuthFile(context.codexAuthPath);
+  } catch (readError) {
+    error = toErrorMessage(readError);
+  }
+
+  const matchingProfileIds = auth
+    ? profiles
+      .filter((entry) => codexAuthExactlyMatchesCredential(auth, entry.credential))
+      .map((entry) => entry.profileId)
+    : [];
+
+  let drift = false;
+  if (expectedCredential && isCodexCompatibleCredential(expectedCredential)) {
+    try {
+      const expected = buildCodexAuthFile(expectedCredential);
+      drift = !raw || serializeComparable(raw) !== serializeComparable(expected);
+    } catch {
+      drift = true;
+    }
+  }
+
+  return {
+    auth,
+    raw,
+    error,
+    matchingProfileIds,
+    linkedProfileId: matchingProfileIds.length === 1 ? matchingProfileIds[0] : null,
+    ambiguous: matchingProfileIds.length > 1,
+    drift,
+  };
+}
+
+function inspectOpenClawRuntime(context, localStore = null) {
+  let store = null;
+  let error = null;
+
+  try {
+    store = context.runtimeAuthStoreExists ? readAuthStore(context.runtimeAuthStorePath) : null;
+  } catch (readError) {
+    error = toErrorMessage(readError);
+  }
+
+  const expected = localStore ? buildRuntimeAuthStore(localStore) : null;
+  const drift = Boolean(expected) && serializeComparable(store ? buildRuntimeAuthStore(store) : null) !== serializeComparable(expected);
+
+  return {
+    store,
+    error,
+    drift,
+  };
+}
+
+function buildCodexSummary(context, codexRuntime, expectedProfileId = null) {
+  return {
+    exists: context.codexAuthExists,
+    path: context.codexAuthPath,
+    linkedProfileId: codexRuntime.linkedProfileId,
+    expectedProfileId,
+    accountId: codexRuntime.auth?.tokens?.accountId || null,
+    lastRefresh: codexRuntime.auth?.lastRefresh || null,
+    error: codexRuntime.error,
+    drift: codexRuntime.drift,
+  };
+}
+
+function buildOpenClawRuntimeSummary(context, runtimeAuth) {
+  return {
+    exists: context.runtimeAuthStoreExists,
+    path: context.runtimeAuthStorePath,
+    error: runtimeAuth.error,
+    drift: runtimeAuth.drift,
+    profileCount: runtimeAuth.store ? listCodexProfiles(runtimeAuth.store).length : 0,
+  };
+}
+
+function buildDashboardWarnings(baseWarnings, context, codexRuntime, runtimeAuth, localStoreReady) {
+  const warnings = [...baseWarnings];
+
+  if (!localStoreReady) {
+    warnings.unshift("Local auth store is not initialized yet. Initialize from runtime files or import an encrypted bundle.");
+  }
+
+  if (runtimeAuth?.error) {
+    warnings.push(`Failed to read OpenClaw auth-profiles.json: ${runtimeAuth.error}`);
+  } else if (localStoreReady && runtimeAuth?.drift) {
+    warnings.push("OpenClaw runtime auth-profiles.json has drifted from the local canonical store.");
+  }
+
+  if (codexRuntime.error) {
+    warnings.push(`Failed to read ~/.codex/auth.json: ${codexRuntime.error}`);
+  } else if (context.codexAuthExists && codexRuntime.auth && codexRuntime.matchingProfileIds.length === 0) {
+    warnings.push("Current ~/.codex/auth.json does not match any stored profile.");
+  } else if (codexRuntime.ambiguous) {
+    warnings.push("Current ~/.codex/auth.json matches multiple stored profiles.");
+  } else if (localStoreReady && codexRuntime.drift) {
+    warnings.push("Current ~/.codex/auth.json has drifted from the local canonical selection.");
+  }
+
+  return warnings;
+}
+
+async function updateAuthStore(options, updater) {
+  const context = resolvePaths(options);
+  ensureLocalStoreInitialized(context);
+  fs.mkdirSync(path.dirname(context.localAuthStorePath), { recursive: true });
+  return await withFileLock(context.localAuthStorePath, async () => {
+    const store = readAuthStore(context.localAuthStorePath);
+    const next = updater(store, context);
+    writeAuthStore(context.localAuthStorePath, buildLocalAuthStore(next));
+    return next;
+  });
+}
+
+async function updateOpenClawConfig(options, updater) {
+  const context = resolvePaths(options);
+  fs.mkdirSync(path.dirname(context.configPath), { recursive: true });
+  return await withFileLock(context.configPath, async () => {
+    const config = readOpenClawConfig(context.configPath);
+    const next = updater(config, context);
+    writeOpenClawConfig(context.configPath, next);
+    return next;
+  });
+}
+
+async function updateSessionStore(options, updater) {
+  const context = resolvePaths(options);
+  fs.mkdirSync(path.dirname(context.sessionStorePath), { recursive: true });
+  return await withFileLock(context.sessionStorePath, async () => {
+    const store = readSessionStore(context.sessionStorePath);
+    const next = updater(store, context);
+    writeSessionStore(context.sessionStorePath, next);
+    return next;
+  });
+}
+
+async function touchRuntimeSelection(options, preferredProfileId) {
+  const context = resolvePaths(options);
+
+  await updateOpenClawConfig(options, (config) => touchOpenClawConfig(config));
+
+  if (context.sessionStoreExists && preferredProfileId) {
+    await updateSessionStore(options, (store) =>
+      clearAutoAuthProfileOverrides(store, {
+        provider: CODEX_PROVIDER,
+        preferredProfileId,
+      }).store,
+    );
+  }
+}
+
+async function writeCodexSelection(options, credential) {
+  const context = resolvePaths(options);
+  fs.mkdirSync(path.dirname(context.codexAuthPath), { recursive: true });
+  await withFileLock(context.codexAuthPath, async () => {
+    writeCodexAuthFile(context.codexAuthPath, credential);
+  });
+}
+
+async function writeRuntimeAuthProjection(options, store) {
+  const context = resolvePaths(options);
+  fs.mkdirSync(path.dirname(context.runtimeAuthStorePath), { recursive: true });
+  await withFileLock(context.runtimeAuthStorePath, async () => {
+    writeRuntimeAuthStore(context.runtimeAuthStorePath, store);
+  });
+}
+
+async function syncRuntimeConfig(options, store, configOptions = {}) {
+  const preferredOrder = getPreferredOrder(store);
+  const runtimeProfileIds = listCodexProfiles(store).map((entry) => entry.profileId);
+  await updateOpenClawConfig(options, (config) => {
+    const synced = syncCodexIntoConfig(config, runtimeProfileIds, preferredOrder);
+    return configOptions.touch ? touchOpenClawConfig(synced) : synced;
+  });
+}
+
+async function exportRuntimeFromLocal(options, store, exportOptions = {}) {
+  await writeRuntimeAuthProjection(options, store);
+  await syncRuntimeConfig(options, store, { touch: Boolean(exportOptions.touchConfig) });
+
+  if (exportOptions.preferredProfileId) {
+    await touchRuntimeSelection(options, exportOptions.preferredProfileId);
+  }
+
+  if (exportOptions.codexCredential && isCodexCompatibleCredential(exportOptions.codexCredential)) {
+    await writeCodexSelection(options, exportOptions.codexCredential);
+  }
+}
+
+function mergeRefreshedCredential(existing, incoming) {
+  return {
+    ...existing,
+    ...incoming,
+    codexAuth: incoming.codexAuth ?? existing.codexAuth,
+  };
+}
+
+function assertMatchingProfileIdentity(profileId, existing, incoming) {
+  const existingAccountId = resolveAccountId(existing);
+  const incomingAccountId = resolveAccountId(incoming);
+  if (existingAccountId && incomingAccountId && existingAccountId !== incomingAccountId) {
+    throw new Error(`Logged-in account does not match profile "${profileId}".`);
+  }
+
+  const existingEmail = normalizeEmail(resolveEmail(existing));
+  const incomingEmail = normalizeEmail(resolveEmail(incoming));
+  if (existingEmail && incomingEmail && existingEmail !== incomingEmail) {
+    throw new Error(`Logged-in account does not match profile "${profileId}".`);
+  }
+}
+
+function credentialHasSameIdentity(left, right) {
+  const leftAccountId = resolveAccountId(left);
+  const rightAccountId = resolveAccountId(right);
+  if (leftAccountId && rightAccountId) {
+    return leftAccountId === rightAccountId;
+  }
+
+  const leftEmail = normalizeEmail(resolveEmail(left));
+  const rightEmail = normalizeEmail(resolveEmail(right));
+  if (leftEmail && rightEmail) {
+    return leftEmail === rightEmail;
+  }
+
+  return false;
+}
+
+function exactRefreshMatch(left, right) {
+  const leftRefresh = typeof left?.refresh === "string" ? left.refresh.trim() : "";
+  const rightRefresh = typeof right?.refresh === "string" ? right.refresh.trim() : "";
+  return Boolean(leftRefresh) && leftRefresh === rightRefresh;
+}
+
+function resolveImportTargetProfileId(localStore, incomingProfileId, incomingCredential) {
+  const profiles = Object.entries(localStore.profiles);
+  const sameId = localStore.profiles[incomingProfileId];
+  if (sameId && credentialHasSameIdentity(sameId, incomingCredential)) {
+    return incomingProfileId;
+  }
+
+  const accountMatches = profiles
+    .filter(([, credential]) => {
+      const existingAccountId = resolveAccountId(credential);
+      const incomingAccountId = resolveAccountId(incomingCredential);
+      return Boolean(existingAccountId) && Boolean(incomingAccountId) && existingAccountId === incomingAccountId;
+    })
+    .map(([profileId]) => profileId);
+  if (accountMatches.length === 1) {
+    return accountMatches[0];
+  }
+
+  const refreshMatches = profiles
+    .filter(([, credential]) => exactRefreshMatch(credential, incomingCredential))
+    .map(([profileId]) => profileId);
+  if (refreshMatches.length === 1) {
+    return refreshMatches[0];
+  }
+
+  return null;
+}
+
+function createImportedProfileId(profileId, existingIds) {
+  const suffix = profileId.startsWith(`${CODEX_PROVIDER}:`)
+    ? profileId.slice(`${CODEX_PROVIDER}:`.length)
+    : profileId;
+  const base = `${CODEX_PROVIDER}:${suffix}-imported`;
+  if (!existingIds.has(base)) {
+    return base;
+  }
+  let index = 2;
+  while (existingIds.has(`${base}-${index}`)) {
+    index += 1;
+  }
+  return `${base}-${index}`;
+}
+
+function summarizeImportActions(actions) {
+  return actions.reduce((summary, action) => {
+    summary.total += 1;
+    summary[action.type] = (summary[action.type] || 0) + 1;
+    return summary;
+  }, {
+    total: 0,
+    add: 0,
+    update: 0,
+    skip: 0,
+    "renamed-import": 0,
+  });
+}
+
+function previewBundleImport(localStore, importedStore) {
+  const next = buildLocalAuthStore(localStore);
+  const existingIds = new Set(Object.keys(next.profiles));
+  const idMap = new Map();
+  const actions = [];
+  const importedOrder = getPreferredOrder(importedStore);
+
+  for (const [incomingProfileId, incomingCredential] of Object.entries(importedStore.profiles)) {
+    const targetProfileId = resolveImportTargetProfileId(next, incomingProfileId, incomingCredential);
+
+    if (targetProfileId) {
+      const existing = next.profiles[targetProfileId];
+      const merged = mergeRefreshedCredential(existing, incomingCredential);
+      const type = serializeComparable(existing) === serializeComparable(merged) ? "skip" : "update";
+      next.profiles[targetProfileId] = merged;
+      idMap.set(incomingProfileId, targetProfileId);
+      actions.push({
+        type,
+        sourceProfileId: incomingProfileId,
+        targetProfileId,
+      });
+      continue;
+    }
+
+    const finalProfileId = existingIds.has(incomingProfileId)
+      ? createImportedProfileId(incomingProfileId, existingIds)
+      : incomingProfileId;
+    existingIds.add(finalProfileId);
+    next.profiles[finalProfileId] = incomingCredential;
+    idMap.set(incomingProfileId, finalProfileId);
+    actions.push({
+      type: finalProfileId === incomingProfileId ? "add" : "renamed-import",
+      sourceProfileId: incomingProfileId,
+      targetProfileId: finalProfileId,
+    });
+  }
+
+  const localOrder = getPreferredOrder(localStore);
+  const addedProfileIds = actions
+    .filter((action) => action.type === "add" || action.type === "renamed-import")
+    .map((action) => action.targetProfileId);
+  const mappedImportedOrder = importedOrder
+    .map((profileId) => idMap.get(profileId))
+    .filter(Boolean);
+
+  next.order = next.order ?? {};
+  next.order[CODEX_PROVIDER] = localOrder.length > 0
+    ? dedupeStrings([...localOrder, ...mappedImportedOrder.filter((profileId) => addedProfileIds.includes(profileId))])
+    : dedupeStrings(mappedImportedOrder);
+
+  const usageStats = isRecord(next.usageStats) ? structuredClone(next.usageStats) : {};
+  for (const [sourceProfileId, finalProfileId] of idMap.entries()) {
+    if (importedStore.usageStats?.[sourceProfileId]) {
+      usageStats[finalProfileId] = importedStore.usageStats[sourceProfileId];
+    }
+  }
+  next.usageStats = Object.keys(usageStats).length > 0 ? usageStats : undefined;
+
+  const localLastGood = localStore.lastGood?.[CODEX_PROVIDER];
+  const importedLastGood = importedStore.lastGood?.[CODEX_PROVIDER];
+  const mappedImportedLastGood = importedLastGood ? idMap.get(importedLastGood) : null;
+  next.lastGood = next.lastGood ?? {};
+  if (localLastGood && next.profiles[localLastGood]) {
+    next.lastGood[CODEX_PROVIDER] = localLastGood;
+  } else if (mappedImportedLastGood && next.profiles[mappedImportedLastGood]) {
+    next.lastGood[CODEX_PROVIDER] = mappedImportedLastGood;
+  } else if (next.lastGood[CODEX_PROVIDER]) {
+    delete next.lastGood[CODEX_PROVIDER];
+  }
+  if (next.lastGood && Object.keys(next.lastGood).length === 0) {
+    next.lastGood = undefined;
+  }
+
+  return {
+    store: buildLocalAuthStore(next),
+    actions,
+    summary: summarizeImportActions(actions),
+  };
 }
 
 export async function loadDashboardState(options = {}, deps = {}) {
   const context = resolvePaths(options);
-  const authStore = readAuthStore(context.authStorePath);
   const config = readOpenClawConfig(context.configPath);
   const configOrder = getConfigCodexOrder(config);
   const configProfileIds = getConfigCodexProfiles(config);
+  const localStoreReady = context.localAuthStoreExists;
+  const authStore = localStoreReady ? readLocalAuthStore(context) : buildLocalAuthStore({});
   const profiles = listCodexProfiles(authStore);
-  const refreshedStore = structuredClone(authStore);
-  let storeChanged = false;
   const runtimeProfileIds = profiles.map((entry) => entry.profileId);
   const currentEffectiveOrder = computeEffectiveOrder(authStore, configOrder);
 
@@ -92,16 +596,9 @@ export async function loadDashboardState(options = {}, deps = {}) {
     };
 
     try {
-      const resolved = await resolveCredentialToken(entry.credential, {
-        proxyConfig: deps.proxyConfig,
-      });
-      if (resolved.updated) {
-        refreshedStore.profiles[entry.profileId] = resolved.credential;
-        storeChanged = true;
-      }
       usage = await fetchCodexUsage({
-        token: resolved.token,
-        accountId: resolveAccountId(resolved.credential) ?? undefined,
+        token: resolveUsageToken(entry.credential),
+        accountId: resolveAccountId(entry.credential) ?? undefined,
         fetchImpl: deps.fetchImpl || fetch,
       });
     } catch (error) {
@@ -113,7 +610,7 @@ export async function loadDashboardState(options = {}, deps = {}) {
       };
     }
 
-    const credential = refreshedStore.profiles[entry.profileId];
+    const credential = entry.credential;
     rows.push({
       profileId: entry.profileId,
       displayLabel: resolveEmail(credential) || entry.profileId,
@@ -130,19 +627,35 @@ export async function loadDashboardState(options = {}, deps = {}) {
     });
   }
 
-  if (storeChanged) {
-    await withFileLock(context.authStorePath, async () => {
-      writeAuthStore(context.authStorePath, refreshedStore);
-    });
-  }
+  const finalProfiles = listCodexProfiles(authStore);
+  const selectedProfileId = getSelectedProfileId(authStore, configOrder);
+  const selectedCredential = selectedProfileId ? authStore.profiles[selectedProfileId] : null;
+  const runtimeAuth = inspectOpenClawRuntime(context, localStoreReady ? authStore : null);
+  const codexRuntime = inspectCodexAuthFile(context, finalProfiles, selectedCredential);
+  const profileMap = new Map(finalProfiles.map((entry) => [entry.profileId, entry.credential]));
 
-  const storedOrder = getStoredOrder(refreshedStore);
+  const storedOrder = getStoredOrder(authStore);
   const recommendedOrder = recommendProfileOrder(rows);
   const rankedRows = rows
-    .map((row) => ({
-      ...row,
-      recommendedOrderIndex: recommendedOrder.indexOf(row.profileId),
-    }))
+    .map((row) => {
+      const credential = profileMap.get(row.profileId);
+      const codexCompatible = isCodexCompatibleCredential(credential);
+      const codexStatusReason = getCodexCompatibilityIssue(credential);
+      const canLinkCurrentCodex =
+        !codexCompatible &&
+        codexRuntime.matchingProfileIds.length === 1 &&
+        codexRuntime.linkedProfileId === row.profileId;
+
+      return {
+        ...row,
+        recommendedOrderIndex: recommendedOrder.indexOf(row.profileId),
+        codexCompatible,
+        codexStatusReason,
+        canLinkCurrentCodex,
+        codexCurrent: codexRuntime.linkedProfileId === row.profileId,
+        isSelectedEverywhere: codexRuntime.linkedProfileId === row.profileId && row.currentOrderIndex === 0,
+      };
+    })
     .toSorted((left, right) => left.recommendedOrderIndex - right.recommendedOrderIndex);
 
   const audit = buildConfigAudit({
@@ -151,128 +664,417 @@ export async function loadDashboardState(options = {}, deps = {}) {
     configProfileIds,
     configOrder,
   });
+  const warnings = buildDashboardWarnings(
+    buildWarnings({ rows: rankedRows, audit, context }),
+    context,
+    codexRuntime,
+    runtimeAuth,
+    localStoreReady,
+  );
 
   return {
     generatedAt: Date.now(),
     context,
+    localStore: {
+      exists: localStoreReady,
+      path: context.localAuthStorePath,
+    },
+    maintenance: buildMaintenanceSummary(authStore),
+    runtimeAuth: buildOpenClawRuntimeSummary(context, runtimeAuth),
+    codexAuth: buildCodexSummary(context, codexRuntime, selectedProfileId),
     currentEffectiveOrder,
     storedOrder,
     configOrder,
     recommendedOrder,
     rows: rankedRows,
-    warnings: buildWarnings({ rows: rankedRows, audit, context }),
+    warnings,
     notes: createNotes(),
     audit,
+    actions: {
+      canBootstrap: !localStoreReady,
+      canImportBundle: true,
+      canExportBundle: localStoreReady,
+      canRebuildRuntime: localStoreReady,
+      canAbsorbRuntime: localStoreReady && context.runtimeAuthStoreExists,
+    },
   };
 }
 
-async function updateAuthStore(options, updater) {
-  const context = resolvePaths(options);
-  return await withFileLock(context.authStorePath, async () => {
-    const store = readAuthStore(context.authStorePath);
-    const next = updater(store, context);
-    writeAuthStore(context.authStorePath, next);
-    return next;
-  });
-}
-
-async function updateOpenClawConfig(options, updater) {
-  const context = resolvePaths(options);
-  return await withFileLock(context.configPath, async () => {
-    const config = readOpenClawConfig(context.configPath);
-    const next = updater(config, context);
-    writeOpenClawConfig(context.configPath, next);
-    return next;
-  });
-}
-
-async function updateSessionStore(options, updater) {
-  const context = resolvePaths(options);
-  return await withFileLock(context.sessionStorePath, async () => {
-    const store = readSessionStore(context.sessionStorePath);
-    const next = updater(store, context);
-    writeSessionStore(context.sessionStorePath, next);
-    return next;
-  });
-}
-
 export async function applyOrder(options, order, deps = {}) {
+  const context = resolvePaths(options);
   const updatedStore = await updateAuthStore(options, (store) => applyOrderToAuthStore(store, order));
   const preferredOrder = getStoredOrder(updatedStore);
+  const preferredProfileId = preferredOrder[0] || null;
+  let finalStore = updatedStore;
+  let codexCredential = null;
+  let applyResult = null;
+
+  if (deps.syncCodexSelection) {
+    applyResult = createApplyResult({
+      codexSelectionAttempted: true,
+      codexSelectionProfileId: preferredProfileId,
+    });
+
+    if (!preferredProfileId) {
+      applyResult.codexSelectionSkippedReason = "没有可同步到 Codex 的推荐账号。";
+    } else {
+      const preferredCredential = updatedStore.profiles[preferredProfileId];
+      if (!preferredCredential) {
+        applyResult.codexSelectionSkippedReason = "推荐账号在本地号池中不存在。";
+      } else if (!isCodexCompatibleCredential(preferredCredential)) {
+        applyResult.codexSelectionSkippedReason = getCodexCompatibilityIssue(preferredCredential);
+      } else {
+        const codexRuntime = inspectCodexAuthFile(
+          context,
+          listCodexProfiles(updatedStore),
+          preferredCredential,
+        );
+
+        if (codexRuntime.linkedProfileId === preferredProfileId && !codexRuntime.drift) {
+          applyResult.codexSelectionSkippedReason = "Codex 当前账号已经是推荐第一名。";
+        } else {
+          try {
+            const resolved = await resolveCredentialToken(preferredCredential, {
+              proxyConfig: deps.proxyConfig,
+              ...(deps.refreshImpl ? { refreshImpl: deps.refreshImpl } : {}),
+            });
+            if (resolved.updated) {
+              finalStore = await updateAuthStore(options, (nextStore) => {
+                const next = structuredClone(nextStore);
+                next.profiles[preferredProfileId] = mergeRefreshedCredential(
+                  next.profiles[preferredProfileId],
+                  resolved.credential,
+                );
+                return next;
+              });
+              codexCredential = finalStore.profiles[preferredProfileId];
+            } else {
+              codexCredential = preferredCredential;
+            }
+            applyResult.codexSelectionUpdated = true;
+            applyResult.codexSelectionSkippedReason = null;
+          } catch (error) {
+            applyResult.codexSelectionSkippedReason = toErrorMessage(error);
+          }
+        }
+      }
+    }
+  }
+
+  await exportRuntimeFromLocal(options, finalStore, {
+    preferredProfileId,
+    codexCredential,
+  });
+  const state = await loadDashboardState(options, deps);
+  return applyResult ? { ...state, applyResult } : state;
+}
+
+export async function runTokenKeepalive(options, deps = {}) {
   const context = resolvePaths(options);
+  ensureLocalStoreInitialized(context);
+  const configOrder = context.configExists ? getConfigCodexOrder(readOpenClawConfig(context.configPath)) : [];
+  const attemptedAt = new Date().toISOString();
+  const failedProfiles = [];
+  const changedProfileIds = [];
+  let exportedRuntime = false;
 
-  if (context.configExists) {
-    await updateOpenClawConfig(options, (config) => touchOpenClawConfig(config));
+  const nextStore = buildLocalAuthStore(readLocalAuthStore(context));
+
+  for (const entry of listCodexProfiles(nextStore)) {
+    if (entry.credential?.type !== "oauth") {
+      continue;
+    }
+
+    try {
+      const resolved = deps.refreshImpl
+        ? await resolveCredentialToken(entry.credential, {
+          proxyConfig: deps.proxyConfig,
+          refreshImpl: deps.refreshImpl,
+        })
+        : await resolveCredentialToken(entry.credential, {
+          proxyConfig: deps.proxyConfig,
+        });
+
+      if (resolved.updated) {
+        nextStore.profiles[entry.profileId] = mergeRefreshedCredential(nextStore.profiles[entry.profileId], resolved.credential);
+        changedProfileIds.push(entry.profileId);
+      }
+    } catch (error) {
+      failedProfiles.push({
+        profileId: entry.profileId,
+        error: toErrorMessage(error),
+      });
+    }
   }
 
-  if (context.sessionStoreExists && preferredOrder.length > 0) {
-    await updateSessionStore(options, (store) =>
-      clearAutoAuthProfileOverrides(store, {
-        provider: CODEX_PROVIDER,
-        preferredProfileId: preferredOrder[0],
-      }).store,
-    );
+  const finalStore = applyMaintenanceUpdate(nextStore, {
+    lastAttemptAt: attemptedAt,
+    lastSuccessAt: attemptedAt,
+    lastError: summarizeFailedProfiles(failedProfiles),
+    lastChangedProfileIds: changedProfileIds,
+  });
+
+  fs.mkdirSync(path.dirname(context.localAuthStorePath), { recursive: true });
+  await withFileLock(context.localAuthStorePath, async () => {
+    writeAuthStore(context.localAuthStorePath, finalStore);
+  });
+
+  if (changedProfileIds.length > 0) {
+    const selectedProfileId = getSelectedProfileId(finalStore, configOrder);
+    const selectedCredential = selectedProfileId ? finalStore.profiles[selectedProfileId] : null;
+    await exportRuntimeFromLocal(options, finalStore, {
+      codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
+    });
+    exportedRuntime = true;
   }
 
+  return {
+    attemptedAt,
+    refreshedCount: changedProfileIds.length,
+    changedProfileIds,
+    failedProfiles,
+    exportedRuntime,
+    state: await loadDashboardState(options, deps),
+  };
+}
+
+export async function switchProfile(options, profileId, deps = {}) {
+  const context = resolvePaths(options);
+  const store = readLocalAuthStore(context);
+  const configOrder = context.configExists ? getConfigCodexOrder(readOpenClawConfig(context.configPath)) : [];
+  const currentOrder = computeEffectiveOrder(store, configOrder);
+  const credential = store.profiles[profileId];
+
+  if (!credential) {
+    throw new Error(`Profile "${profileId}" was not found in the local store.`);
+  }
+  if (!isCodexCompatibleCredential(credential)) {
+    throw new Error(`Profile "${profileId}" is not Codex-compatible yet: ${getCodexCompatibilityIssue(credential)}.`);
+  }
+
+  let exportCredential = credential;
+  const resolved = await resolveCredentialToken(credential, {
+    proxyConfig: deps.proxyConfig,
+  });
+  if (resolved.updated) {
+    exportCredential = resolved.credential;
+    await updateAuthStore(options, (nextStore) => {
+      const next = structuredClone(nextStore);
+      next.profiles[profileId] = mergeRefreshedCredential(next.profiles[profileId], resolved.credential);
+      return next;
+    });
+  }
+
+  const order = [profileId, ...currentOrder.filter((entry) => entry !== profileId)];
+  const nextStore = await updateAuthStore(options, (nextStore) => applyOrderToAuthStore(nextStore, order));
+  await exportRuntimeFromLocal(options, nextStore, {
+    preferredProfileId: profileId,
+    codexCredential: exportCredential,
+  });
   return await loadDashboardState(options, deps);
 }
 
 export async function syncConfig(options, deps = {}) {
   const context = resolvePaths(options);
-  const store = readAuthStore(context.authStorePath);
-  const runtimeProfileIds = listCodexProfiles(store).map((entry) => entry.profileId);
-  const preferredOrder = getStoredOrder(store).length > 0
-    ? getStoredOrder(store)
-    : computeEffectiveOrder(store, []);
-  await updateOpenClawConfig(options, (config) =>
-    syncCodexIntoConfig(config, runtimeProfileIds, preferredOrder),
-  );
+  const store = readLocalAuthStore(context);
+  await syncRuntimeConfig(options, store);
   return await loadDashboardState(options, deps);
 }
 
 export async function renameProfile(options, profileId, nextProfileId, deps = {}) {
-  await updateAuthStore(options, (store) => renameProfileInAuthStore(store, profileId, nextProfileId));
-  const context = resolvePaths(options);
-  if (context.configExists) {
-    await updateOpenClawConfig(options, (config) => renameProfileInConfig(config, profileId, nextProfileId));
-  }
+  const nextStore = await updateAuthStore(options, (store) => renameProfileInAuthStore(store, profileId, nextProfileId));
+  const selectedProfileId = getSelectedProfileId(nextStore);
+  const selectedCredential = selectedProfileId ? nextStore.profiles[selectedProfileId] : null;
+  await exportRuntimeFromLocal(options, nextStore, {
+    codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
+  });
   return await loadDashboardState(options, deps);
 }
 
 export async function deleteProfile(options, profileId, deps = {}) {
-  await updateAuthStore(options, (store) => deleteProfileFromAuthStore(store, profileId));
-  const context = resolvePaths(options);
-  if (context.configExists) {
-    await updateOpenClawConfig(options, (config) => deleteProfileFromConfig(config, profileId));
-  }
+  const nextStore = await updateAuthStore(options, (store) => deleteProfileFromAuthStore(store, profileId));
+  const selectedProfileId = getSelectedProfileId(nextStore);
+  const selectedCredential = selectedProfileId ? nextStore.profiles[selectedProfileId] : null;
+  await exportRuntimeFromLocal(options, nextStore, {
+    preferredProfileId: selectedProfileId,
+    codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
+  });
   return await loadDashboardState(options, deps);
 }
 
-export async function saveLoggedInProfile(options, profileId, credentials) {
-  const nextCredential = enrichOpenAICodexCredential({
-    ...credentials,
-    type: "oauth",
-    provider: CODEX_PROVIDER,
-  });
+export async function linkCurrentCodexToProfile(options, profileId, deps = {}) {
+  const context = resolvePaths(options);
+  const codexAuth = readCodexAuthFile(context.codexAuthPath);
+  if (!codexAuth) {
+    throw new Error("Current ~/.codex/auth.json is missing or unreadable.");
+  }
 
   await updateAuthStore(options, (store) => {
-    if (store.profiles[profileId]) {
-      throw new Error(`Profile "${profileId}" already exists.`);
+    const existing = store.profiles[profileId];
+    if (!existing) {
+      throw new Error(`Profile "${profileId}" was not found in the local store.`);
     }
-    return upsertProfileCredential(store, profileId, nextCredential);
+    if (!codexAuthExactlyMatchesCredential(codexAuth, existing)) {
+      throw new Error("Current ~/.codex/auth.json does not exactly match this stored profile.");
+    }
+
+    const next = structuredClone(store);
+    next.profiles[profileId] = mergeCodexAuthIntoCredential(existing, codexAuth);
+    return next;
   });
 
+  return await loadDashboardState(options, deps);
+}
+
+export async function bootstrapLocalStore(options, deps = {}) {
   const context = resolvePaths(options);
-  if (context.configExists) {
-    const store = readAuthStore(context.authStorePath);
-    const runtimeProfileIds = listCodexProfiles(store).map((entry) => entry.profileId);
-    const preferredOrder = getStoredOrder(store).length > 0
-      ? getStoredOrder(store)
-      : computeEffectiveOrder(store, []);
-    await updateOpenClawConfig(options, (config) =>
-      syncCodexIntoConfig(config, runtimeProfileIds, preferredOrder),
-    );
+  if (context.localAuthStoreExists) {
+    throw new Error("Local auth store is already initialized.");
   }
+
+  let nextStore = context.runtimeAuthStoreExists
+    ? buildLocalAuthStore(readRuntimeAuthStore(context))
+    : buildLocalAuthStore({});
+
+  if (context.codexAuthExists) {
+    const codexAuth = readCodexAuthFile(context.codexAuthPath);
+    if (codexAuth) {
+      const matches = listCodexProfiles(nextStore)
+        .filter((entry) => codexAuthExactlyMatchesCredential(codexAuth, entry.credential))
+        .map((entry) => entry.profileId);
+      if (matches.length === 1) {
+        nextStore = structuredClone(nextStore);
+        nextStore.profiles[matches[0]] = mergeCodexAuthIntoCredential(nextStore.profiles[matches[0]], codexAuth);
+      }
+    }
+  }
+
+  fs.mkdirSync(path.dirname(context.localAuthStorePath), { recursive: true });
+  await withFileLock(context.localAuthStorePath, async () => {
+    writeAuthStore(context.localAuthStorePath, nextStore);
+  });
+
+  return await loadDashboardState(options, deps);
+}
+
+export async function rebuildRuntime(options, deps = {}) {
+  const context = resolvePaths(options);
+  const store = readLocalAuthStore(context);
+  const selectedProfileId = getSelectedProfileId(store);
+  const selectedCredential = selectedProfileId ? store.profiles[selectedProfileId] : null;
+
+  await exportRuntimeFromLocal(options, store, {
+    preferredProfileId: selectedProfileId,
+    codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
+  });
+
+  return await loadDashboardState(options, deps);
+}
+
+export async function absorbOpenClawRuntime(options, deps = {}) {
+  const context = resolvePaths(options);
+  ensureLocalStoreInitialized(context);
+  if (!context.runtimeAuthStoreExists) {
+    throw new Error("OpenClaw runtime auth-profiles.json does not exist.");
+  }
+
+  const runtimeStore = readRuntimeAuthStore(context);
+  await updateAuthStore(options, (store) => {
+    const next = buildLocalAuthStore(store);
+
+    for (const [profileId, runtimeCredential] of Object.entries(runtimeStore.profiles)) {
+      next.profiles[profileId] = next.profiles[profileId]
+        ? mergeRefreshedCredential(next.profiles[profileId], runtimeCredential)
+        : runtimeCredential;
+    }
+
+    next.order = runtimeStore.order;
+    next.lastGood = runtimeStore.lastGood;
+    next.usageStats = runtimeStore.usageStats;
+    return next;
+  });
+
+  return await loadDashboardState(options, deps);
+}
+
+export async function exportBundle(options, request = {}, deps = {}) {
+  const context = resolvePaths(options);
+  const store = readLocalAuthStore(context);
+  const bundle = createEncryptedExportBundle(store, request.passphrase);
+  const timestamp = new Date().toISOString().replaceAll(":", "-");
+
+  return {
+    fileName: `codex-auth-bundle-${timestamp}.json`,
+    bundle,
+    state: await loadDashboardState(options, deps),
+  };
+}
+
+export async function previewImportBundle(options, request = {}, deps = {}) {
+  const context = resolvePaths(options);
+  const imported = readEncryptedExportBundle(request.bundle, request.passphrase);
+  const localStore = context.localAuthStoreExists ? readLocalAuthStore(context) : buildLocalAuthStore({});
+  const preview = previewBundleImport(localStore, imported.store);
+
+  return {
+    preview: {
+      createdAt: imported.createdAt,
+      summary: preview.summary,
+      actions: preview.actions,
+    },
+    state: await loadDashboardState(options, deps),
+  };
+}
+
+export async function commitImportBundle(options, request = {}, deps = {}) {
+  const context = resolvePaths(options);
+  const imported = readEncryptedExportBundle(request.bundle, request.passphrase);
+  const localStore = context.localAuthStoreExists ? readLocalAuthStore(context) : buildLocalAuthStore({});
+  const preview = previewBundleImport(localStore, imported.store);
+
+  fs.mkdirSync(path.dirname(context.localAuthStorePath), { recursive: true });
+  await withFileLock(context.localAuthStorePath, async () => {
+    writeAuthStore(context.localAuthStorePath, preview.store);
+  });
+
+  const selectedProfileId = getSelectedProfileId(preview.store);
+  const selectedCredential = selectedProfileId ? preview.store.profiles[selectedProfileId] : null;
+  await exportRuntimeFromLocal(options, preview.store, {
+    preferredProfileId: selectedProfileId,
+    codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
+  });
+
+  return await loadDashboardState(options, deps);
+}
+
+export async function saveLoggedInProfile(options, profileId, credentials, saveOptions = {}) {
+  const intent = saveOptions.intent === "upgrade" ? "upgrade" : "create";
+  const nextCredential = buildStoredCodexCredential(credentials);
+
+  const nextStore = await updateAuthStore(options, (store) => {
+    const existing = store.profiles[profileId];
+    if (intent === "create") {
+      if (existing) {
+        throw new Error(`Profile "${profileId}" already exists.`);
+      }
+      return upsertProfileCredential(store, profileId, nextCredential);
+    }
+
+    if (!existing) {
+      throw new Error(`Profile "${profileId}" was not found in auth-profiles.json.`);
+    }
+
+    assertMatchingProfileIdentity(profileId, existing, nextCredential);
+    const next = structuredClone(store);
+    next.profiles[profileId] = mergeRefreshedCredential(existing, nextCredential);
+    return next;
+  });
+
+  const selectedProfileId = getSelectedProfileId(nextStore);
+  const selectedCredential = selectedProfileId ? nextStore.profiles[selectedProfileId] : null;
+  await exportRuntimeFromLocal(options, nextStore, {
+    codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
+  });
 }
 
 function createDeferred() {
@@ -380,6 +1182,7 @@ export class LoginManager {
     return {
       taskId: task.id,
       profileId: task.profileId,
+      intent: task.intent,
       status: task.status,
       authUrl: task.authUrl || null,
       instructions: task.instructions || null,
@@ -394,14 +1197,22 @@ export class LoginManager {
     };
   }
 
-  start(options, profileId) {
-    if (!profileId.startsWith(`${CODEX_PROVIDER}:`)) {
+  start(options, request) {
+    const target = typeof request === "string"
+      ? { profileId: request, intent: "create" }
+      : {
+        profileId: typeof request?.profileId === "string" ? request.profileId.trim() : "",
+        intent: request?.intent === "upgrade" ? "upgrade" : "create",
+      };
+
+    if (!target.profileId.startsWith(`${CODEX_PROVIDER}:`)) {
       throw new Error(`Profile id must start with "${CODEX_PROVIDER}:".`);
     }
 
     const task = {
       id: randomUUID(),
-      profileId,
+      profileId: target.profileId,
+      intent: target.intent,
       status: "starting",
       authUrl: null,
       instructions: null,
@@ -487,11 +1298,13 @@ export class LoginManager {
       });
 
       task.status = "saving";
-      task.manualHint = "Authorization code accepted. Saving the new profile.";
+      task.manualHint = task.intent === "upgrade"
+        ? "Authorization code accepted. Updating the profile."
+        : "Authorization code accepted. Saving the new profile.";
       task.updatedAt = Date.now();
-      await this.saveProfile(options, task.profileId, credentials);
+      await this.saveProfile(options, task.profileId, credentials, { intent: task.intent });
       task.status = "completed";
-      task.manualHint = "OAuth login completed.";
+      task.manualHint = task.intent === "upgrade" ? "Profile upgrade completed." : "OAuth login completed.";
       task.updatedAt = Date.now();
     } catch (error) {
       task.status = "failed";

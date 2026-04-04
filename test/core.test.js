@@ -5,13 +5,27 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { applyOrderToAuthStore, deleteProfileFromAuthStore, renameProfileInAuthStore } from "../src/auth-store.js";
-import { loginWithCodex, resolveCredentialToken } from "../src/codex-auth.js";
+import { applyOrderToAuthStore, deleteProfileFromAuthStore, readAuthStore, renameProfileInAuthStore, writeAuthStore } from "../src/auth-store.js";
+import { bundleContainsPlaintext, readEncryptedExportBundle } from "../src/auth-bundle.js";
+import { buildCodexAuthFile, readCodexAuthFile } from "../src/codex-cli-auth.js";
+import { buildStoredCodexCredential, loginWithCodex, resolveCredentialToken } from "../src/codex-auth.js";
 import { deleteProfileFromConfig, syncCodexIntoConfig, touchOpenClawConfig } from "../src/config-store.js";
 import { openBrowser, parseArgs } from "../src/index.js";
 import { buildConfigAudit, buildWarnings, recommendProfileOrder } from "../src/order.js";
 import { clearAutoAuthProfileOverrides, readSessionStore } from "../src/session-store.js";
-import { applyOrder, LoginManager, waitForOpenAICallbackPort } from "../src/state.js";
+import {
+  applyOrder,
+  bootstrapLocalStore,
+  commitImportBundle,
+    exportBundle,
+    linkCurrentCodexToProfile,
+    loadDashboardState,
+    LoginManager,
+    previewImportBundle,
+    runTokenKeepalive,
+    switchProfile,
+    waitForOpenAICallbackPort,
+  } from "../src/state.js";
 import { renderHtml } from "../src/ui.js";
 import { createUsageFetch, resolveUsageProxyUrl } from "../src/usage-fetch.js";
 
@@ -44,6 +58,12 @@ async function waitForTaskStatus(manager, taskId, expectedStatus) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.fail(`Task ${taskId} did not reach status ${expectedStatus}`);
+}
+
+function writeLocalStore(stateDir, store) {
+  const localAuthStorePath = path.join(stateDir, ".local", "auth-store.json");
+  writeAuthStore(localAuthStorePath, store);
+  return localAuthStorePath;
 }
 
 test("recommendProfileOrder prefers earlier secondary reset time", () => {
@@ -225,6 +245,31 @@ test("deleteProfileFromAuthStore removes related references", () => {
   assert.equal(updated.usageStats, undefined);
 });
 
+test("buildStoredCodexCredential preserves Codex sidecar fields for export", () => {
+  const credential = buildStoredCodexCredential({
+    access: "access-token",
+    refresh: "refresh-token",
+    expires: Date.now() + 60_000,
+    accountId: "account-id",
+    email: "person@example.com",
+    idToken: "id-token",
+    authMode: "chatgpt",
+    lastRefresh: "2026-04-02T18:02:46.501Z",
+  });
+
+  assert.deepEqual(buildCodexAuthFile(credential), {
+    auth_mode: "chatgpt",
+    OPENAI_API_KEY: null,
+    tokens: {
+      id_token: "id-token",
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      account_id: "account-id",
+    },
+    last_refresh: "2026-04-02T18:02:46.501Z",
+  });
+});
+
 test("syncCodexIntoConfig adds missing profiles and order entries", () => {
   const config = {
     auth: {
@@ -325,8 +370,10 @@ test("clearAutoAuthProfileOverrides keeps preferred and user-selected sessions",
 
 test("applyOrder touches config and clears auto session overrides for older codex profiles", async () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-state-"));
+  const localStateDir = path.join(stateDir, ".local");
   const agentDir = path.join(stateDir, "agents", "main", "agent");
   const sessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
   fs.mkdirSync(agentDir, { recursive: true });
   fs.mkdirSync(sessionsDir, { recursive: true });
 
@@ -348,6 +395,23 @@ test("applyOrder touches config and clears auto session overrides for older code
       "openai-codex": ["openai-codex:default", "openai-codex:work"],
     },
   }, null, 2));
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "token",
+        provider: "openai-codex",
+        token: "default-token",
+      },
+      "openai-codex:work": {
+        type: "token",
+        provider: "openai-codex",
+        token: "work-token",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+  });
 
   fs.writeFileSync(path.join(stateDir, "openclaw.json"), JSON.stringify({
     meta: {
@@ -397,7 +461,7 @@ test("applyOrder touches config and clears auto session overrides for older code
 
   try {
     await applyOrder(
-      { stateDir, agent: "main" },
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
       ["openai-codex:work", "openai-codex:default"],
       {
         fetchImpl: async () => ({
@@ -433,6 +497,510 @@ test("applyOrder touches config and clears auto session overrides for older code
     assert.equal(sessions["agent:main:old"].authProfileOverride, undefined);
     assert.equal(sessions["agent:main:preferred"].authProfileOverride, "openai-codex:work");
     assert.equal(sessions["agent:main:user"].authProfileOverride, "openai-codex:default");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("applyOrder can sync Codex selection when applying a recommended order", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-apply-sync-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "default-access",
+        refresh: "default-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "account-default",
+        email: "default@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "default-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+      "openai-codex:work": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "work-access",
+        refresh: "work-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "account-work",
+        email: "work@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "work-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+  });
+
+  try {
+    const state = await applyOrder(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      ["openai-codex:work", "openai-codex:default"],
+      {
+        syncCodexSelection: true,
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 20, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 30, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    assert.equal(state.applyResult?.codexSelectionAttempted, true);
+    assert.equal(state.applyResult?.codexSelectionUpdated, true);
+    assert.equal(state.applyResult?.codexSelectionProfileId, "openai-codex:work");
+    assert.equal(state.applyResult?.codexSelectionSkippedReason, null);
+
+    const runtimeStore = readAuthStore(path.join(agentDir, "auth-profiles.json"));
+    assert.deepEqual(runtimeStore.order["openai-codex"], ["openai-codex:work", "openai-codex:default"]);
+
+    const codexAuth = readCodexAuthFile(codexAuthPath);
+    assert.equal(codexAuth.tokens.idToken, "work-id-token");
+    assert.equal(codexAuth.tokens.accessToken, "work-access");
+    assert.equal(codexAuth.tokens.refreshToken, "work-refresh");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("applyOrder skips Codex sync when the recommended top profile is not Codex-compatible", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-apply-skip-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+  fs.mkdirSync(path.dirname(codexAuthPath), { recursive: true });
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "default-access",
+        refresh: "default-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "account-default",
+        email: "default@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "default-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+      "openai-codex:work": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "work-access",
+        refresh: "work-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "account-work",
+        email: "work@example.com",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+  });
+
+  fs.writeFileSync(codexAuthPath, JSON.stringify({
+    auth_mode: "chatgpt",
+    OPENAI_API_KEY: null,
+    tokens: {
+      id_token: "default-id-token",
+      access_token: "default-access",
+      refresh_token: "default-refresh",
+      account_id: "account-default",
+    },
+    last_refresh: "2026-04-02T18:02:46.501Z",
+  }, null, 2));
+
+  try {
+    const state = await applyOrder(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      ["openai-codex:work", "openai-codex:default"],
+      {
+        syncCodexSelection: true,
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 20, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 30, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    assert.equal(state.applyResult?.codexSelectionAttempted, true);
+    assert.equal(state.applyResult?.codexSelectionUpdated, false);
+    assert.equal(state.applyResult?.codexSelectionProfileId, "openai-codex:work");
+    assert.equal(state.applyResult?.codexSelectionSkippedReason, "缺少 Codex id_token");
+
+    const runtimeStore = readAuthStore(path.join(agentDir, "auth-profiles.json"));
+    assert.deepEqual(runtimeStore.order["openai-codex"], ["openai-codex:work", "openai-codex:default"]);
+
+    const codexAuth = readCodexAuthFile(codexAuthPath);
+    assert.equal(codexAuth.tokens.idToken, "default-id-token");
+    assert.equal(codexAuth.tokens.accessToken, "default-access");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("linkCurrentCodexToProfile absorbs matching current Codex auth sidecar", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-link-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+
+  fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
+    version: 1,
+    profiles: {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "same-access",
+        refresh: "same-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "account-id",
+        email: "person@example.com",
+      },
+    },
+  }, null, 2));
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "same-access",
+        refresh: "same-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "account-id",
+        email: "person@example.com",
+      },
+    },
+  });
+
+  fs.mkdirSync(path.dirname(codexAuthPath), { recursive: true });
+  fs.writeFileSync(codexAuthPath, JSON.stringify({
+    auth_mode: "chatgpt",
+    OPENAI_API_KEY: null,
+    tokens: {
+      id_token: "id-token",
+      access_token: "same-access",
+      refresh_token: "same-refresh",
+      account_id: "account-id",
+    },
+    last_refresh: "2026-04-02T18:02:46.501Z",
+  }, null, 2));
+
+  try {
+    await linkCurrentCodexToProfile(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      "openai-codex:default",
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 10, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 20, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    const store = readAuthStore(path.join(localStateDir, "auth-store.json"));
+    assert.deepEqual(store.profiles["openai-codex:default"].codexAuth, {
+      authMode: "chatgpt",
+      idToken: "id-token",
+      lastRefresh: "2026-04-02T18:02:46.501Z",
+    });
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("switchProfile writes projected ~/.codex/auth.json for Codex-compatible profiles", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-switch-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+
+  fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
+    version: 2,
+    profiles: {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "default-access",
+        refresh: "default-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "account-default",
+        email: "default@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "default-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+      "openai-codex:work": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "work-access",
+        refresh: "work-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "account-work",
+        email: "work@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "work-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+  }, null, 2));
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "default-access",
+        refresh: "default-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "account-default",
+        email: "default@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "default-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+      "openai-codex:work": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "work-access",
+        refresh: "work-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "account-work",
+        email: "work@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "work-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+  });
+
+  try {
+    await switchProfile(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      "openai-codex:work",
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    const store = readAuthStore(path.join(agentDir, "auth-profiles.json"));
+    assert.deepEqual(store.order["openai-codex"], ["openai-codex:work", "openai-codex:default"]);
+
+    const codexAuth = readCodexAuthFile(codexAuthPath);
+    assert.ok(codexAuth);
+    assert.equal(codexAuth.tokens.idToken, "work-id-token");
+    assert.equal(codexAuth.tokens.accessToken, "work-access");
+    assert.equal(codexAuth.tokens.refreshToken, "work-refresh");
+    assert.equal(codexAuth.tokens.accountId, "account-work");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("loadDashboardState does not implicitly refresh OAuth credentials", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-state-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  let refreshCalls = 0;
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "stale-access",
+        refresh: "stale-refresh",
+        expires: Date.now() - 1_000,
+        accountId: "account-default",
+        email: "default@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "default-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+    },
+  });
+
+  try {
+    await loadDashboardState(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        refreshImpl: async () => {
+          refreshCalls += 1;
+          return {
+            access: "new-access",
+            refresh: "new-refresh",
+            expires: Date.now() + 60_000,
+          };
+        },
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    assert.equal(refreshCalls, 0);
+    const store = readAuthStore(path.join(localStateDir, "auth-store.json"));
+    assert.equal(store.profiles["openai-codex:default"].access, "stale-access");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("runTokenKeepalive refreshes OAuth profiles, updates maintenance, and rewrites runtime projections", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-keepalive-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "default-access",
+        refresh: "default-refresh",
+        expires: Date.now() - 1_000,
+        accountId: "account-default",
+        email: "default@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "default-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+      "openai-codex:work": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "work-access",
+        refresh: "work-refresh",
+        expires: Date.now() - 1_000,
+        accountId: "account-work",
+        email: "work@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "work-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+  });
+
+  try {
+    const result = await runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        refreshImpl: async (refreshToken) => ({
+          access: `next-${refreshToken}`,
+          refresh: `next-${refreshToken}`,
+          expires: Date.now() + 60_000,
+        }),
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 12, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 22, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    assert.equal(result.refreshedCount, 2);
+    assert.equal(result.exportedRuntime, true);
+    assert.deepEqual(result.changedProfileIds, ["openai-codex:default", "openai-codex:work"]);
+
+    const localStore = readAuthStore(path.join(localStateDir, "auth-store.json"));
+    assert.equal(localStore.profiles["openai-codex:default"].access, "next-default-refresh");
+    assert.equal(localStore.profiles["openai-codex:work"].refresh, "next-work-refresh");
+    assert.ok(localStore.maintenance?.lastAttemptAt);
+    assert.deepEqual(localStore.maintenance?.lastChangedProfileIds, ["openai-codex:default", "openai-codex:work"]);
+
+    const runtimeRaw = JSON.parse(fs.readFileSync(path.join(agentDir, "auth-profiles.json"), "utf8"));
+    assert.equal(runtimeRaw.maintenance, undefined);
+    assert.equal(runtimeRaw.profiles["openai-codex:default"].access, "next-default-refresh");
+
+    const codexAuth = readCodexAuthFile(codexAuthPath);
+    assert.equal(codexAuth.tokens.accessToken, "next-default-refresh");
+    assert.equal(codexAuth.tokens.refreshToken, "next-default-refresh");
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -478,7 +1046,19 @@ test("parseArgs accepts explicit port override", () => {
   assert.equal(args.open, true);
 });
 
-test("renderHtml exposes accounts view toggle for quota and email suffix grouping", () => {
+test("parseArgs accepts codex auth override", () => {
+  const args = parseArgs(["node", "src/index.js", "--codex-auth", "/tmp/codex-auth.json"]);
+
+  assert.equal(args.codexAuthPath, "/tmp/codex-auth.json");
+});
+
+test("parseArgs accepts local state dir override", () => {
+  const args = parseArgs(["node", "src/index.js", "--local-state-dir", "/tmp/local-state"]);
+
+  assert.equal(args.localStateDir, "/tmp/local-state");
+});
+
+test("renderHtml exposes accounts view toggle and compact toolbar structure", () => {
   const html = renderHtml();
 
   assert.match(html, /id="accountsViewQuota"/);
@@ -486,6 +1066,16 @@ test("renderHtml exposes accounts view toggle for quota and email suffix groupin
   assert.match(html, /id="accountsViewGrouped"/);
   assert.match(html, /邮箱后缀分组/);
   assert.match(html, /codex-auth-dashboard\.accounts-view/);
+  assert.match(html, /id="toolsMenu"/);
+  assert.match(html, /更多工具/);
+  assert.match(html, /id="toolbarHelpCard"/);
+  assert.match(html, /id="refreshButton"[^>]*>刷新额度</);
+  assert.match(html, /id="tabTokenRefresh"/);
+  assert.match(html, /刷新 Token/);
+  assert.match(html, /id="tokenRefreshButton"/);
+  assert.match(html, /id="tokenRefreshIntervalInput"/);
+  assert.doesNotMatch(html, /id="spotlightApplyButton"/);
+  assert.doesNotMatch(html, /id="spotlightRefreshButton"/);
 });
 
 test("buildWarnings flags config order mismatch as informational warning", () => {
@@ -503,16 +1093,168 @@ test("buildWarnings flags config order mismatch as informational warning", () =>
     ],
     audit,
     context: {
-      authStoreExists: true,
+      localAuthStoreExists: true,
       configExists: true,
     },
   });
 
   assert.ok(
     warnings.includes(
-      "openclaw.json auth.order differs from auth-profiles.json order; runtime uses auth-profiles.json.",
+      "openclaw.json auth.order differs from the local auth store order; runtime export follows the local store.",
     ),
   );
+});
+
+test("bootstrapLocalStore imports runtime auth store and matching Codex sidecar", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-bootstrap-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+  fs.mkdirSync(path.dirname(codexAuthPath), { recursive: true });
+
+  fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
+    version: 2,
+    profiles: {
+      "openai-codex:work": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "bootstrap-access",
+        refresh: "bootstrap-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "bootstrap-account",
+        email: "bootstrap@example.com",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:work"],
+    },
+  }, null, 2));
+  fs.writeFileSync(codexAuthPath, JSON.stringify({
+    auth_mode: "chatgpt",
+    OPENAI_API_KEY: null,
+    tokens: {
+      id_token: "bootstrap-id",
+      access_token: "bootstrap-access",
+      refresh_token: "bootstrap-refresh",
+      account_id: "bootstrap-account",
+    },
+    last_refresh: "2026-04-02T18:02:46.501Z",
+  }, null, 2));
+
+  try {
+    await bootstrapLocalStore(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 10, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 20, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    const store = readAuthStore(path.join(localStateDir, "auth-store.json"));
+    assert.deepEqual(store.order["openai-codex"], ["openai-codex:work"]);
+    assert.deepEqual(store.profiles["openai-codex:work"].codexAuth, {
+      authMode: "chatgpt",
+      idToken: "bootstrap-id",
+      lastRefresh: "2026-04-02T18:02:46.501Z",
+    });
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("exportBundle and commitImportBundle round-trip encrypted local store", async () => {
+  const sourceStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-export-src-"));
+  const sourceLocalStateDir = path.join(sourceStateDir, ".local");
+  const sourceCodexAuthPath = path.join(sourceStateDir, ".codex", "auth.json");
+  writeLocalStore(sourceStateDir, {
+    profiles: {
+      "openai-codex:work": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "export-access",
+        refresh: "export-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "export-account",
+        email: "export@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "export-id",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:work"],
+    },
+  });
+
+  const usageFetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        rate_limit: {
+          primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+          secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+        },
+      };
+    },
+  });
+
+  try {
+    const exported = await exportBundle(
+      { stateDir: sourceStateDir, localStateDir: sourceLocalStateDir, agent: "main", codexAuthPath: sourceCodexAuthPath },
+      { passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    assert.equal(bundleContainsPlaintext(exported.bundle, "export-access"), false);
+    const decrypted = readEncryptedExportBundle(exported.bundle, "secret-passphrase");
+    assert.equal(decrypted.store.profiles["openai-codex:work"].access, "export-access");
+    assert.equal(decrypted.store.maintenance, undefined);
+
+    const targetStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-export-dst-"));
+    const targetLocalStateDir = path.join(targetStateDir, ".local");
+    const targetCodexAuthPath = path.join(targetStateDir, ".codex", "auth.json");
+
+    try {
+      const preview = await previewImportBundle(
+        { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+        { bundle: exported.bundle, passphrase: "secret-passphrase" },
+        { fetchImpl: usageFetch },
+      );
+      assert.equal(preview.preview.summary.add, 1);
+
+      await commitImportBundle(
+        { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+        { bundle: exported.bundle, passphrase: "secret-passphrase" },
+        { fetchImpl: usageFetch },
+      );
+
+      const localStore = readAuthStore(path.join(targetLocalStateDir, "auth-store.json"));
+      assert.equal(localStore.profiles["openai-codex:work"].codexAuth.idToken, "export-id");
+
+      const runtimeStore = readAuthStore(path.join(targetStateDir, "agents", "main", "agent", "auth-profiles.json"));
+      assert.equal(runtimeStore.profiles["openai-codex:work"].codexAuth, undefined);
+
+      const codexAuth = readCodexAuthFile(targetCodexAuthPath);
+      assert.equal(codexAuth.tokens.idToken, "export-id");
+      assert.equal(codexAuth.tokens.accessToken, "export-access");
+    } finally {
+      fs.rmSync(targetStateDir, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(sourceStateDir, { recursive: true, force: true });
+  }
 });
 
 test("resolveUsageProxyUrl prefers explicit URL and falls back to env", () => {

@@ -1,6 +1,11 @@
 export const CODEX_PROVIDER = "openai-codex";
-export const AUTH_STORE_VERSION = 1;
+export const LOCAL_STORE_KIND = "codex-auth-dashboard-store";
+export const LOCAL_AUTH_STORE_VERSION = 1;
+export const RUNTIME_AUTH_STORE_VERSION = 2;
+export const EXPORT_BUNDLE_KIND = "codex-auth-dashboard-export";
+export const EXPORT_BUNDLE_VERSION = 1;
 export const DEFAULT_STATE_DIRNAME = ".openclaw";
+export const DEFAULT_LOCAL_STATE_DIRNAME = ".local";
 export const DEFAULT_TIMEOUT_MS = 8_000;
 export const LOCK_TIMEOUT_MS = 5_000;
 export const LOCK_RETRY_MS = 75;
