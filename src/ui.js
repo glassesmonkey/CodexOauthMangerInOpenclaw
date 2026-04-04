@@ -1166,6 +1166,10 @@ export function renderHtml() {
         grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
       }
 
+      .panel-span-full {
+        grid-column: 1 / -1;
+      }
+
       .panel {
         padding: 26px;
         animation: rise 460ms ease;
@@ -2449,6 +2453,70 @@ export function renderHtml() {
                   </div>
                 </div>
               </section>
+
+              <section class="card panel panel-span-full">
+                <div class="panel-head">
+                  <div>
+                    <h2>到期提醒</h2>
+                    <p class="panel-copy">提醒只检查账号到期时间，不会自动刷新 Token。进入提醒窗口后会在页面里持续显示，进入紧急窗口时只弹一次。</p>
+                  </div>
+                </div>
+
+                <div class="settings-section">
+                  <label class="toggle">
+                    <input id="tokenReminderEnabledToggle" type="checkbox" />
+                    <span>
+                      <strong>开启到期提醒</strong>
+                      <span class="field-note">页面首次打开、重新切回前台时会立刻检查；页面保持打开时按间隔自动检查。</span>
+                    </span>
+                  </label>
+                </div>
+
+                <div class="settings-section">
+                  <label class="field">
+                    <span class="field-label">自动检查间隔（分钟）</span>
+                    <input id="tokenReminderIntervalInput" class="input" type="number" min="1" step="1" value="30" />
+                    <span class="field-note">默认 30 分钟。值越小越及时，但检查频率更高。</span>
+                  </label>
+
+                  <label class="field">
+                    <span class="field-label">到期几天前提醒</span>
+                    <input id="tokenReminderWarnDaysInput" class="input" type="number" min="0" step="1" value="1" />
+                    <span class="field-note">进入这个窗口后，会在页面顶部持续显示提醒卡片。</span>
+                  </label>
+
+                  <label class="field">
+                    <span class="field-label">到期几小时前弹窗</span>
+                    <input id="tokenReminderModalHoursInput" class="input" type="number" min="0" step="1" value="6" />
+                    <span class="field-note">同一账号在同一次到期时间下，只会弹一次紧急提醒。</span>
+                  </label>
+                </div>
+
+                <div class="settings-section">
+                  <div class="snapshot-grid">
+                    <div class="snapshot-item">
+                      <div class="stat-label">最近检查</div>
+                      <div id="tokenReminderLastCheckedValue" class="snapshot-value">-</div>
+                    </div>
+                    <div class="snapshot-item">
+                      <div class="stat-label">下一次检查</div>
+                      <div id="tokenReminderNextRunValue" class="snapshot-value">-</div>
+                    </div>
+                    <div class="snapshot-item">
+                      <div class="stat-label">页内提醒</div>
+                      <div id="tokenReminderWarnCountValue" class="snapshot-value">0 个账号</div>
+                    </div>
+                    <div class="snapshot-item">
+                      <div class="stat-label">紧急弹窗</div>
+                      <div id="tokenReminderModalCountValue" class="snapshot-value">0 个账号</div>
+                    </div>
+                    <div class="snapshot-item">
+                      <div class="stat-label">最早到期</div>
+                      <div id="tokenReminderEarliestValue" class="snapshot-value">-</div>
+                    </div>
+                  </div>
+                </div>
+              </section>
             </div>
           </section>
 
@@ -2615,6 +2683,30 @@ export function renderHtml() {
       </div>
     </div>
 
+    <div id="tokenReminderModal" class="modal-shell" hidden aria-hidden="true">
+      <div class="modal-backdrop" data-token-reminder-modal-close="true"></div>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="tokenReminderModalTitle">
+        <div class="modal-top">
+          <div>
+            <div class="modal-eyebrow">Token Reminder</div>
+            <h2 id="tokenReminderModalTitle" class="modal-title">这些账号快到期了</h2>
+            <p id="tokenReminderModalCopy" class="modal-copy">-</p>
+          </div>
+          <button id="tokenReminderModalCloseButton" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-form">
+          <div class="modal-detail-card">
+            <strong>需要你手动处理</strong>
+            <div id="tokenReminderModalList" class="alert-list"></div>
+          </div>
+          <div class="modal-actions">
+            <button id="tokenReminderModalDismissButton" class="button-secondary" type="button">知道了</button>
+            <button id="tokenReminderModalFocusButton" class="button-primary" type="button">查看 Token 页</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script>
       const appState = {
         data: null,
@@ -2634,6 +2726,18 @@ export function renderHtml() {
         tokenRefreshTimer: null,
         tokenRefreshIntervalSeconds: 0,
         tokenRefreshNextRunAt: null,
+        tokenReminderEnabled: true,
+        tokenReminderTimer: null,
+        tokenReminderCheckIntervalMinutes: 30,
+        tokenReminderWarnDays: 1,
+        tokenReminderModalHours: 6,
+        tokenReminderNextRunAt: null,
+        tokenReminderSnapshot: null,
+        tokenReminderLastCheckedAt: null,
+        tokenReminderWarnProfiles: [],
+        tokenReminderModalProfiles: [],
+        tokenReminderPendingModalProfiles: [],
+        tokenReminderSeen: {},
         autoApplyRecommended: false,
         usageProxyEnabled: false,
         usageProxyUrl: "",
@@ -2647,6 +2751,11 @@ export function renderHtml() {
       const QUOTA_REFRESH_INTERVAL_STORAGE_KEY = "codex-auth-dashboard.quota-refresh-interval-seconds";
       const LEGACY_REFRESH_INTERVAL_STORAGE_KEY = "codex-auth-dashboard.refresh-interval-seconds";
       const TOKEN_REFRESH_INTERVAL_STORAGE_KEY = "codex-auth-dashboard.token-refresh-interval-seconds";
+      const TOKEN_REMINDER_ENABLED_STORAGE_KEY = "codex-auth-dashboard.token-reminder-enabled";
+      const TOKEN_REMINDER_INTERVAL_STORAGE_KEY = "codex-auth-dashboard.token-reminder-check-minutes";
+      const TOKEN_REMINDER_WARN_DAYS_STORAGE_KEY = "codex-auth-dashboard.token-reminder-warn-days";
+      const TOKEN_REMINDER_MODAL_HOURS_STORAGE_KEY = "codex-auth-dashboard.token-reminder-modal-hours";
+      const TOKEN_REMINDER_SEEN_STORAGE_KEY = "codex-auth-dashboard.token-reminder-seen";
       const AUTO_APPLY_STORAGE_KEY = "codex-auth-dashboard.auto-apply-after-refresh";
       const USAGE_PROXY_ENABLED_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-enabled";
       const USAGE_PROXY_URL_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-url";
@@ -2681,6 +2790,15 @@ export function renderHtml() {
       const tokenChangedProfilesValue = document.getElementById("tokenChangedProfilesValue");
       const tokenNextRunValue = document.getElementById("tokenNextRunValue");
       const tokenLastErrorValue = document.getElementById("tokenLastErrorValue");
+      const tokenReminderEnabledToggle = document.getElementById("tokenReminderEnabledToggle");
+      const tokenReminderIntervalInput = document.getElementById("tokenReminderIntervalInput");
+      const tokenReminderWarnDaysInput = document.getElementById("tokenReminderWarnDaysInput");
+      const tokenReminderModalHoursInput = document.getElementById("tokenReminderModalHoursInput");
+      const tokenReminderLastCheckedValue = document.getElementById("tokenReminderLastCheckedValue");
+      const tokenReminderNextRunValue = document.getElementById("tokenReminderNextRunValue");
+      const tokenReminderWarnCountValue = document.getElementById("tokenReminderWarnCountValue");
+      const tokenReminderModalCountValue = document.getElementById("tokenReminderModalCountValue");
+      const tokenReminderEarliestValue = document.getElementById("tokenReminderEarliestValue");
       const usageProxyUrlInput = document.getElementById("usageProxyUrlInput");
       const autoApplyToggle = document.getElementById("autoApplyToggle");
       const usageProxyToggle = document.getElementById("usageProxyToggle");
@@ -2737,6 +2855,12 @@ export function renderHtml() {
       const renameProfileIdInput = document.getElementById("renameProfileIdInput");
       const deleteField = document.getElementById("deleteField");
       const manageModalError = document.getElementById("manageModalError");
+      const tokenReminderModal = document.getElementById("tokenReminderModal");
+      const tokenReminderModalCopy = document.getElementById("tokenReminderModalCopy");
+      const tokenReminderModalList = document.getElementById("tokenReminderModalList");
+      const tokenReminderModalCloseButton = document.getElementById("tokenReminderModalCloseButton");
+      const tokenReminderModalDismissButton = document.getElementById("tokenReminderModalDismissButton");
+      const tokenReminderModalFocusButton = document.getElementById("tokenReminderModalFocusButton");
 
       const TOOLBAR_ACTIONS = {
         refresh: {
@@ -2809,6 +2933,148 @@ export function renderHtml() {
         }
         const ms = ts > 10_000_000_000 ? ts : ts * 1000;
         return new Date(ms).toLocaleString("zh-CN", { hour12: false });
+      }
+
+      function normalizeReminderSeenMap(value) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          return {};
+        }
+        const normalized = {};
+        Object.entries(value).forEach(([key, storedAt]) => {
+          if (typeof key === "string" && key && typeof storedAt === "string" && storedAt) {
+            normalized[key] = storedAt;
+          }
+        });
+        return normalized;
+      }
+
+      function toTimestampMs(ts) {
+        if (typeof ts !== "number" || !Number.isFinite(ts)) {
+          return null;
+        }
+        return ts > 10_000_000_000 ? ts : ts * 1000;
+      }
+
+      function formatRelativeDuration(diffMs) {
+        if (!Number.isFinite(diffMs)) {
+          return "时间未知";
+        }
+
+        const absoluteMs = Math.abs(diffMs);
+        const totalMinutes = Math.floor(absoluteMs / 60_000);
+        const totalHours = Math.floor(absoluteMs / 3_600_000);
+        const totalDays = Math.floor(absoluteMs / 86_400_000);
+
+        let text = "";
+        if (totalDays > 0) {
+          const hours = Math.floor((absoluteMs % 86_400_000) / 3_600_000);
+          text = totalDays + "天" + (hours > 0 ? " " + hours + "小时" : "");
+        } else if (totalHours > 0) {
+          const minutes = Math.floor((absoluteMs % 3_600_000) / 60_000);
+          text = totalHours + "小时" + (minutes > 0 ? " " + minutes + "分钟" : "");
+        } else {
+          text = Math.max(1, totalMinutes) + "分钟";
+        }
+
+        return diffMs <= 0 ? "已过期 " + text : "还有 " + text;
+      }
+
+      function describeTokenExpiry(profile) {
+        const expiresAtMs = toTimestampMs(profile?.expiresAt);
+        if (!expiresAtMs) {
+          return "到期时间未知";
+        }
+        return formatRelativeDuration(expiresAtMs - Date.now()) + "（" + formatTime(expiresAtMs) + "）";
+      }
+
+      function buildTokenReminderSnapshotFromDashboardState(data) {
+        const localStorePath = data?.localStore?.path || "";
+        const rows = Array.isArray(data?.rows) ? data.rows : [];
+        const profiles = rows
+          .filter((row) => row?.type === "oauth" && typeof row?.expiresAt === "number" && Number.isFinite(row.expiresAt))
+          .map((row) => ({
+            profileId: row.profileId,
+            displayLabel: row.displayLabel || row.profileId,
+            email: row.email || null,
+            expiresAt: row.expiresAt,
+          }))
+          .toSorted((left, right) => left.expiresAt - right.expiresAt);
+
+        return {
+          generatedAt: data?.generatedAt || Date.now(),
+          localStore: {
+            exists: Boolean(data?.localStore?.exists),
+            path: localStorePath,
+          },
+          profiles,
+        };
+      }
+
+      function getTokenReminderSeenKey(profile, stage) {
+        return [profile?.profileId || "", String(profile?.expiresAt || ""), stage || ""].join("|");
+      }
+
+      function pruneTokenReminderSeen(snapshot) {
+        const profiles = Array.isArray(snapshot?.profiles) ? snapshot.profiles : [];
+        const activeKeys = new Set();
+        profiles.forEach((profile) => {
+          activeKeys.add(getTokenReminderSeenKey(profile, "warn"));
+          activeKeys.add(getTokenReminderSeenKey(profile, "modal"));
+        });
+
+        const nextSeen = {};
+        Object.entries(appState.tokenReminderSeen).forEach(([key, storedAt]) => {
+          if (activeKeys.has(key)) {
+            nextSeen[key] = storedAt;
+          }
+        });
+        appState.tokenReminderSeen = nextSeen;
+      }
+
+      function persistTokenReminderSeen() {
+        try {
+          window.localStorage.setItem(
+            TOKEN_REMINDER_SEEN_STORAGE_KEY,
+            JSON.stringify(normalizeReminderSeenMap(appState.tokenReminderSeen)),
+          );
+        } catch {
+          // Ignore localStorage failures in restricted browsers.
+        }
+      }
+
+      function buildTokenReminderEvaluation(snapshot) {
+        const profiles = Array.isArray(snapshot?.profiles) ? snapshot.profiles : [];
+        const modalWindowMs = Math.max(0, appState.tokenReminderModalHours) * 3_600_000;
+        const warnWindowMs = Math.max(Math.max(0, appState.tokenReminderWarnDays) * 86_400_000, modalWindowMs);
+        const warnProfiles = [];
+        const modalProfiles = [];
+
+        profiles.forEach((profile) => {
+          const expiresAtMs = toTimestampMs(profile.expiresAt);
+          if (!expiresAtMs) {
+            return;
+          }
+
+          const expiresInMs = expiresAtMs - Date.now();
+          const enriched = {
+            ...profile,
+            expiresAt: expiresAtMs,
+            expiresInMs,
+          };
+
+          if (expiresInMs <= warnWindowMs) {
+            warnProfiles.push(enriched);
+          }
+          if (expiresInMs <= modalWindowMs) {
+            modalProfiles.push(enriched);
+          }
+        });
+
+        return {
+          warnProfiles,
+          modalProfiles,
+          earliestProfile: warnProfiles[0] || profiles[0] || null,
+        };
       }
 
       function formatCountdown(ts) {
@@ -3093,6 +3359,117 @@ export function renderHtml() {
         appState.tokenRefreshNextRunAt = null;
       }
 
+      function clearTokenReminderTimer() {
+        if (appState.tokenReminderTimer) {
+          window.clearTimeout(appState.tokenReminderTimer);
+          appState.tokenReminderTimer = null;
+        }
+        appState.tokenReminderNextRunAt = null;
+      }
+
+      function markTokenReminderStageSeen(profiles, stage) {
+        const nowIso = new Date().toISOString();
+        profiles.forEach((profile) => {
+          appState.tokenReminderSeen[getTokenReminderSeenKey(profile, stage)] = nowIso;
+        });
+        persistTokenReminderSeen();
+      }
+
+      function closeTokenReminderModal() {
+        tokenReminderModal.hidden = true;
+        tokenReminderModal.setAttribute("aria-hidden", "true");
+      }
+
+      function openTokenReminderModal(profiles) {
+        if (!Array.isArray(profiles) || profiles.length === 0) {
+          closeTokenReminderModal();
+          return;
+        }
+
+        tokenReminderModalCopy.textContent = profiles.length === 1
+          ? "这个账号已经进入紧急窗口，请尽快手动刷新或重新登录。"
+          : "这些账号已经进入紧急窗口，请尽快手动刷新或重新登录。";
+        tokenReminderModalList.innerHTML = "";
+        profiles.slice(0, 6).forEach((profile) => {
+          const line = document.createElement("div");
+          line.className = "alert-item";
+          line.textContent = (profile.displayLabel || profile.profileId) + " · " + describeTokenExpiry(profile);
+          tokenReminderModalList.appendChild(line);
+        });
+        if (profiles.length > 6) {
+          const overflow = document.createElement("div");
+          overflow.className = "alert-item";
+          overflow.textContent = "还有 " + String(profiles.length - 6) + " 个账号也已进入紧急窗口。";
+          tokenReminderModalList.appendChild(overflow);
+        }
+
+        tokenReminderModal.hidden = false;
+        tokenReminderModal.setAttribute("aria-hidden", "false");
+      }
+
+      function presentTokenReminderModal(profiles) {
+        if (!Array.isArray(profiles) || profiles.length === 0) {
+          return;
+        }
+        markTokenReminderStageSeen(profiles, "modal");
+        appState.tokenReminderPendingModalProfiles = [];
+        openTokenReminderModal(profiles);
+      }
+
+      function renderTokenReminderStatus() {
+        const evaluation = buildTokenReminderEvaluation(appState.tokenReminderSnapshot);
+        appState.tokenReminderWarnProfiles = evaluation.warnProfiles;
+        appState.tokenReminderModalProfiles = evaluation.modalProfiles;
+
+        tokenReminderEnabledToggle.checked = appState.tokenReminderEnabled;
+        tokenReminderIntervalInput.value = String(appState.tokenReminderCheckIntervalMinutes);
+        tokenReminderWarnDaysInput.value = String(appState.tokenReminderWarnDays);
+        tokenReminderModalHoursInput.value = String(appState.tokenReminderModalHours);
+        tokenReminderLastCheckedValue.textContent = formatTime(appState.tokenReminderLastCheckedAt);
+        tokenReminderNextRunValue.textContent = appState.tokenReminderEnabled && appState.tokenReminderNextRunAt
+          ? formatTime(appState.tokenReminderNextRunAt)
+          : appState.tokenReminderEnabled
+            ? "等待下次检查"
+            : "已关闭";
+        tokenReminderWarnCountValue.textContent = evaluation.warnProfiles.length + " 个账号";
+        tokenReminderModalCountValue.textContent = evaluation.modalProfiles.length + " 个账号";
+        tokenReminderEarliestValue.textContent = evaluation.earliestProfile
+          ? (evaluation.earliestProfile.displayLabel || evaluation.earliestProfile.profileId) + " · " + describeTokenExpiry(evaluation.earliestProfile)
+          : "暂无临近账号";
+      }
+
+      function applyTokenReminderSnapshot(snapshot, options = {}) {
+        appState.tokenReminderSnapshot = snapshot;
+        appState.tokenReminderLastCheckedAt = snapshot?.generatedAt || Date.now();
+        pruneTokenReminderSeen(snapshot);
+        persistTokenReminderSeen();
+        renderTokenReminderStatus();
+        if (appState.data) {
+          renderOverviewStats(appState.data);
+          renderAlerts(appState.data);
+        }
+
+        if (!options.allowModal || !appState.tokenReminderEnabled) {
+          return;
+        }
+
+        const unseenModalProfiles = appState.tokenReminderModalProfiles.filter(
+          (profile) => !appState.tokenReminderSeen[getTokenReminderSeenKey(profile, "modal")],
+        );
+
+        if (unseenModalProfiles.length === 0) {
+          appState.tokenReminderPendingModalProfiles = [];
+          return;
+        }
+
+        if (document.hidden) {
+          appState.tokenReminderPendingModalProfiles = unseenModalProfiles;
+          return;
+        }
+
+        presentTokenReminderModal(unseenModalProfiles);
+      }
+
       function renderTokenRefreshStatus(data = appState.data) {
         const maintenance = data?.maintenance || {};
         tokenLastAttemptValue.textContent = formatTime(maintenance.lastAttemptAt);
@@ -3104,12 +3481,17 @@ export function renderHtml() {
         tokenNextRunValue.textContent = appState.tokenRefreshIntervalSeconds > 0 && appState.tokenRefreshNextRunAt
           ? new Date(appState.tokenRefreshNextRunAt).toLocaleString("zh-CN", { hour12: false })
           : "已关闭";
+        renderTokenReminderStatus();
       }
 
       function persistAutomationSettings() {
         try {
           window.localStorage.setItem(QUOTA_REFRESH_INTERVAL_STORAGE_KEY, String(appState.quotaRefreshIntervalSeconds));
           window.localStorage.setItem(TOKEN_REFRESH_INTERVAL_STORAGE_KEY, String(appState.tokenRefreshIntervalSeconds));
+          window.localStorage.setItem(TOKEN_REMINDER_ENABLED_STORAGE_KEY, String(appState.tokenReminderEnabled));
+          window.localStorage.setItem(TOKEN_REMINDER_INTERVAL_STORAGE_KEY, String(appState.tokenReminderCheckIntervalMinutes));
+          window.localStorage.setItem(TOKEN_REMINDER_WARN_DAYS_STORAGE_KEY, String(appState.tokenReminderWarnDays));
+          window.localStorage.setItem(TOKEN_REMINDER_MODAL_HOURS_STORAGE_KEY, String(appState.tokenReminderModalHours));
           window.localStorage.setItem(AUTO_APPLY_STORAGE_KEY, String(appState.autoApplyRecommended));
           window.localStorage.setItem(USAGE_PROXY_ENABLED_STORAGE_KEY, String(appState.usageProxyEnabled));
           window.localStorage.setItem(USAGE_PROXY_URL_STORAGE_KEY, appState.usageProxyUrl);
@@ -3123,6 +3505,10 @@ export function renderHtml() {
       function syncAutomationControls() {
         quotaRefreshIntervalInput.value = String(appState.quotaRefreshIntervalSeconds);
         tokenRefreshIntervalInput.value = String(appState.tokenRefreshIntervalSeconds);
+        tokenReminderEnabledToggle.checked = appState.tokenReminderEnabled;
+        tokenReminderIntervalInput.value = String(appState.tokenReminderCheckIntervalMinutes);
+        tokenReminderWarnDaysInput.value = String(appState.tokenReminderWarnDays);
+        tokenReminderModalHoursInput.value = String(appState.tokenReminderModalHours);
         usageProxyUrlInput.value = appState.usageProxyUrl;
         autoApplyToggle.checked = appState.autoApplyRecommended;
         usageProxyToggle.checked = appState.usageProxyEnabled;
@@ -3141,6 +3527,24 @@ export function renderHtml() {
           if (Number.isFinite(storedTokenInterval) && storedTokenInterval >= 0) {
             appState.tokenRefreshIntervalSeconds = Math.floor(storedTokenInterval);
           }
+          const storedReminderInterval = Number(window.localStorage.getItem(TOKEN_REMINDER_INTERVAL_STORAGE_KEY));
+          if (Number.isFinite(storedReminderInterval) && storedReminderInterval >= 1) {
+            appState.tokenReminderCheckIntervalMinutes = Math.floor(storedReminderInterval);
+          }
+          const storedReminderWarnDays = Number(window.localStorage.getItem(TOKEN_REMINDER_WARN_DAYS_STORAGE_KEY));
+          if (Number.isFinite(storedReminderWarnDays) && storedReminderWarnDays >= 0) {
+            appState.tokenReminderWarnDays = Math.floor(storedReminderWarnDays);
+          }
+          const storedReminderModalHours = Number(window.localStorage.getItem(TOKEN_REMINDER_MODAL_HOURS_STORAGE_KEY));
+          if (Number.isFinite(storedReminderModalHours) && storedReminderModalHours >= 0) {
+            appState.tokenReminderModalHours = Math.floor(storedReminderModalHours);
+          }
+          const storedReminderSeen = window.localStorage.getItem(TOKEN_REMINDER_SEEN_STORAGE_KEY);
+          appState.tokenReminderSeen = storedReminderSeen
+            ? normalizeReminderSeenMap(JSON.parse(storedReminderSeen))
+            : {};
+          const storedReminderEnabled = window.localStorage.getItem(TOKEN_REMINDER_ENABLED_STORAGE_KEY);
+          appState.tokenReminderEnabled = storedReminderEnabled !== "false";
           appState.autoApplyRecommended = window.localStorage.getItem(AUTO_APPLY_STORAGE_KEY) === "true";
           appState.usageProxyEnabled = window.localStorage.getItem(USAGE_PROXY_ENABLED_STORAGE_KEY) === "true";
           appState.usageProxyUrl = window.localStorage.getItem(USAGE_PROXY_URL_STORAGE_KEY) || "";
@@ -3155,6 +3559,11 @@ export function renderHtml() {
         } catch {
           appState.quotaRefreshIntervalSeconds = 0;
           appState.tokenRefreshIntervalSeconds = 0;
+          appState.tokenReminderEnabled = true;
+          appState.tokenReminderCheckIntervalMinutes = 30;
+          appState.tokenReminderWarnDays = 1;
+          appState.tokenReminderModalHours = 6;
+          appState.tokenReminderSeen = {};
           appState.autoApplyRecommended = false;
           appState.usageProxyEnabled = false;
           appState.usageProxyUrl = "";
@@ -3241,6 +3650,24 @@ export function renderHtml() {
         }, appState.tokenRefreshIntervalSeconds * 1000);
       }
 
+      function scheduleTokenReminderCheck() {
+        clearTokenReminderTimer();
+        if (!appState.tokenReminderEnabled || !appState.data?.localStore?.exists) {
+          renderTokenReminderStatus();
+          return;
+        }
+
+        appState.tokenReminderNextRunAt = Date.now() + appState.tokenReminderCheckIntervalMinutes * 60_000;
+        renderTokenReminderStatus();
+        appState.tokenReminderTimer = window.setTimeout(() => {
+          if (appState.busy) {
+            scheduleTokenReminderCheck();
+            return;
+          }
+          void refreshTokenExpirySnapshot();
+        }, appState.tokenReminderCheckIntervalMinutes * 60_000);
+      }
+
       function shouldAutoApplyRecommendedOrder(data) {
         return Boolean(
           appState.autoApplyRecommended &&
@@ -3268,6 +3695,10 @@ export function renderHtml() {
         }
         const query = params.toString();
         return query ? "/api/state?" + query : "/api/state";
+      }
+
+      function buildTokenReminderUrl() {
+        return "/api/token-expiry";
       }
 
       function setToolbarButtonText(button, actionKey) {
@@ -3342,6 +3773,10 @@ export function renderHtml() {
         }
         quotaRefreshIntervalInput.disabled = disabled;
         tokenRefreshIntervalInput.disabled = disabled || !storeReady;
+        tokenReminderEnabledToggle.disabled = disabled || !storeReady;
+        tokenReminderIntervalInput.disabled = disabled || !storeReady || !appState.tokenReminderEnabled;
+        tokenReminderWarnDaysInput.disabled = disabled || !storeReady || !appState.tokenReminderEnabled;
+        tokenReminderModalHoursInput.disabled = disabled || !storeReady || !appState.tokenReminderEnabled;
         autoApplyToggle.disabled = disabled;
         usageProxyToggle.disabled = disabled;
         usageProxyUrlInput.disabled = disabled;
@@ -3349,6 +3784,8 @@ export function renderHtml() {
         addModalSubmitButton.disabled = disabled || loginInProgress;
         renameProfileIdInput.disabled = disabled || loginInProgress;
         manageModalSubmitButton.disabled = disabled || loginInProgress;
+        tokenReminderModalFocusButton.disabled = disabled;
+        tokenReminderModalDismissButton.disabled = disabled;
         document.querySelectorAll("[data-action-button]").forEach((button) => {
           button.disabled = button.dataset.lockedDisabled === "true" || disabled || loginInProgress || !storeReady;
         });
@@ -3857,6 +4294,23 @@ export function renderHtml() {
         return card;
       }
 
+      function createTokenReminderAlertCard() {
+        const modalCount = appState.tokenReminderModalProfiles.length;
+        const warnCount = appState.tokenReminderWarnProfiles.length;
+        if (!appState.tokenReminderEnabled || warnCount === 0) {
+          return null;
+        }
+
+        const tone = modalCount > 0 ? "danger" : "warn";
+        const items = [];
+        const earliest = appState.tokenReminderWarnProfiles[0];
+        items.push((modalCount > 0 ? "紧急 " : "临近 ") + warnCount + " 个账号需要留意");
+        if (earliest) {
+          items.push((earliest.displayLabel || earliest.profileId) + " · " + describeTokenExpiry(earliest));
+        }
+        return createAlertCard("Token 到期提醒", tone, items);
+      }
+
       function createLoginAlertCard(task) {
         const tone = task.status === "failed" ? "danger" : task.status === "completed" ? "ok" : "info";
         const card = document.createElement("section");
@@ -4016,6 +4470,11 @@ export function renderHtml() {
           cards.push(createLoginAlertCard(appState.loginTask));
         }
 
+        const tokenReminderCard = createTokenReminderAlertCard();
+        if (tokenReminderCard) {
+          cards.push(tokenReminderCard);
+        }
+
         if (data?.warnings?.length) {
           cards.push(createAlertCard("提醒", "warn", [String(data.warnings.length) + " 项待处理"]));
         }
@@ -4054,11 +4513,13 @@ export function renderHtml() {
       }
 
       function renderOverviewStats(data) {
-        profilesCountValue.textContent = String(data.rows.length);
-        const summary = summarizeSecondaryWindow(data.rows);
+        const rows = Array.isArray(data?.rows) ? data.rows : [];
+        profilesCountValue.textContent = String(rows.length);
+        const summary = summarizeSecondaryWindow(rows);
         depletedProfilesValue.textContent = String(summary.depleted);
         availableProfilesValue.textContent = String(summary.available);
-        warningsCountValue.textContent = String(data.warnings.length);
+        const warnings = Array.isArray(data?.warnings) ? data.warnings : [];
+        warningsCountValue.textContent = String(warnings.length + (appState.tokenReminderEnabled ? appState.tokenReminderWarnProfiles.length : 0));
         const nextReset = collectNextReset(data);
         nextResetValue.textContent = nextReset ? formatCountdown(nextReset).text.replace(/^倒计时 /, "") : "未知";
       }
@@ -4369,6 +4830,7 @@ export function renderHtml() {
 
       function render(data) {
         appState.data = data;
+        applyTokenReminderSnapshot(buildTokenReminderSnapshotFromDashboardState(data));
         renderToolbarState(data);
         renderSpotlight(data);
         renderOverviewStats(data);
@@ -4380,11 +4842,12 @@ export function renderHtml() {
         timeValue.textContent = new Date(data.generatedAt).toLocaleString("zh-CN", { hour12: false });
         renderOrder(effectiveOrder, data.currentEffectiveOrder, data.recommendedOrder[0]);
         renderOrder(recommendedOrder, data.recommendedOrder, data.recommendedOrder[0]);
-        renderAlerts(data);
         syncAccountsViewControls();
         renderProfileCards(data);
         renderTokenRefreshStatus(data);
+        renderAlerts(data);
         scheduleTokenRefresh();
+        scheduleTokenReminderCheck();
         syncTabState();
         syncControlState();
       }
@@ -4412,6 +4875,27 @@ export function renderHtml() {
           throw new Error(data.error || "load failed");
         }
         return data;
+      }
+
+      async function loadTokenExpiryData() {
+        const response = await fetch(buildTokenReminderUrl());
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "load failed");
+        }
+        return data;
+      }
+
+      async function refreshTokenExpirySnapshot() {
+        clearTokenReminderTimer();
+        try {
+          const snapshot = await loadTokenExpiryData();
+          applyTokenReminderSnapshot(snapshot);
+        } catch {
+          renderTokenReminderStatus();
+        } finally {
+          scheduleTokenReminderCheck();
+        }
       }
 
       async function refreshState(okMessage = "额度刷新完成") {
@@ -4903,6 +5387,47 @@ export function renderHtml() {
         setFlash(nextInterval > 0 ? "已设置每 " + nextInterval + " 秒定时刷新 Token" : "已关闭 Token 定时刷新", "info");
       });
 
+      tokenReminderEnabledToggle.addEventListener("change", () => {
+        appState.tokenReminderEnabled = tokenReminderEnabledToggle.checked;
+        if (!appState.tokenReminderEnabled) {
+          appState.tokenReminderPendingModalProfiles = [];
+          closeTokenReminderModal();
+        } else if (appState.data?.localStore?.exists) {
+          void refreshTokenExpirySnapshot();
+        }
+        renderAlerts(appState.data);
+        renderOverviewStats(appState.data);
+        syncAutomationControls();
+        persistAutomationSettings();
+        scheduleTokenReminderCheck();
+        setFlash(appState.tokenReminderEnabled ? "已开启 Token 到期提醒" : "已关闭 Token 到期提醒", "info");
+      });
+
+      tokenReminderIntervalInput.addEventListener("change", () => {
+        const nextInterval = Math.max(1, Math.floor(Number(tokenReminderIntervalInput.value) || 30));
+        appState.tokenReminderCheckIntervalMinutes = nextInterval;
+        syncAutomationControls();
+        persistAutomationSettings();
+        scheduleTokenReminderCheck();
+        setFlash("已设置每 " + nextInterval + " 分钟检查一次 Token 到期时间", "info");
+      });
+
+      tokenReminderWarnDaysInput.addEventListener("change", () => {
+        const nextDays = Math.max(0, Math.floor(Number(tokenReminderWarnDaysInput.value) || 0));
+        appState.tokenReminderWarnDays = nextDays;
+        applyTokenReminderSnapshot(appState.tokenReminderSnapshot);
+        persistAutomationSettings();
+        setFlash("已设置在到期前 " + nextDays + " 天开始页内提醒", "info");
+      });
+
+      tokenReminderModalHoursInput.addEventListener("change", () => {
+        const nextHours = Math.max(0, Math.floor(Number(tokenReminderModalHoursInput.value) || 0));
+        appState.tokenReminderModalHours = nextHours;
+        applyTokenReminderSnapshot(appState.tokenReminderSnapshot);
+        persistAutomationSettings();
+        setFlash("已设置在到期前 " + nextHours + " 小时弹出紧急提醒", "info");
+      });
+
       autoApplyToggle.addEventListener("change", () => {
         appState.autoApplyRecommended = autoApplyToggle.checked;
         persistAutomationSettings();
@@ -4953,10 +5478,22 @@ export function renderHtml() {
         }
       });
 
+      tokenReminderModal.addEventListener("click", (event) => {
+        if (event.target instanceof HTMLElement && event.target.dataset.tokenReminderModalClose === "true") {
+          closeTokenReminderModal();
+        }
+      });
+
       addModalCloseButton.addEventListener("click", closeAddAccountModal);
       addModalCancelButton.addEventListener("click", closeAddAccountModal);
       manageModalCloseButton.addEventListener("click", closeManageModal);
       manageModalCancelButton.addEventListener("click", closeManageModal);
+      tokenReminderModalCloseButton.addEventListener("click", closeTokenReminderModal);
+      tokenReminderModalDismissButton.addEventListener("click", closeTokenReminderModal);
+      tokenReminderModalFocusButton.addEventListener("click", () => {
+        closeTokenReminderModal();
+        setActiveTab("token-refresh");
+      });
 
       addModalForm.addEventListener("submit", (event) => {
         event.preventDefault();
@@ -5002,9 +5539,24 @@ export function renderHtml() {
           closeManageModal();
           return;
         }
+        if (!tokenReminderModal.hidden) {
+          closeTokenReminderModal();
+          return;
+        }
         if (!addModal.hidden) {
           closeAddAccountModal();
         }
+      });
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden || !appState.tokenReminderEnabled || !appState.data?.localStore?.exists) {
+          return;
+        }
+        if (appState.tokenReminderPendingModalProfiles.length > 0) {
+          presentTokenReminderModal(appState.tokenReminderPendingModalProfiles);
+          return;
+        }
+        void refreshTokenExpirySnapshot();
       });
 
       refreshButton.addEventListener("click", () => {

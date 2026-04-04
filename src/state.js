@@ -720,6 +720,41 @@ export async function loadDashboardState(options = {}, deps = {}) {
   };
 }
 
+export async function loadTokenExpirySnapshot(options = {}) {
+  const context = resolvePaths(options);
+  if (!context.localAuthStoreExists) {
+    return {
+      generatedAt: Date.now(),
+      localStore: {
+        exists: false,
+        path: context.localAuthStorePath,
+      },
+      profiles: [],
+    };
+  }
+
+  const store = readLocalAuthStore(context);
+  const profiles = listCodexProfiles(store)
+    .filter((entry) => entry.credential?.type === "oauth")
+    .map((entry) => ({
+      profileId: entry.profileId,
+      displayLabel: resolveEmail(entry.credential) || entry.profileId,
+      email: resolveEmail(entry.credential),
+      expiresAt: resolveExpiresAt(entry.credential),
+    }))
+    .filter((entry) => typeof entry.expiresAt === "number" && Number.isFinite(entry.expiresAt))
+    .toSorted((left, right) => left.expiresAt - right.expiresAt);
+
+  return {
+    generatedAt: Date.now(),
+    localStore: {
+      exists: true,
+      path: context.localAuthStorePath,
+    },
+    profiles,
+  };
+}
+
 export async function applyOrder(options, order, deps = {}) {
   const context = resolvePaths(options);
   const updatedStore = await updateAuthStore(options, (store) => applyOrderToAuthStore(store, order));

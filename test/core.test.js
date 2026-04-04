@@ -17,15 +17,16 @@ import {
   applyOrder,
   bootstrapLocalStore,
   commitImportBundle,
-    exportBundle,
-    linkCurrentCodexToProfile,
-    loadDashboardState,
-    LoginManager,
-    previewImportBundle,
-    runTokenKeepalive,
-    switchProfile,
-    waitForOpenAICallbackPort,
-  } from "../src/state.js";
+  exportBundle,
+  linkCurrentCodexToProfile,
+  loadDashboardState,
+  loadTokenExpirySnapshot,
+  LoginManager,
+  previewImportBundle,
+  runTokenKeepalive,
+  switchProfile,
+  waitForOpenAICallbackPort,
+} from "../src/state.js";
 import { renderHtml } from "../src/ui.js";
 import { createUsageFetch, resolveUsageProxyUrl } from "../src/usage-fetch.js";
 
@@ -1074,8 +1075,71 @@ test("renderHtml exposes accounts view toggle and compact toolbar structure", ()
   assert.match(html, /刷新 Token/);
   assert.match(html, /id="tokenRefreshButton"/);
   assert.match(html, /id="tokenRefreshIntervalInput"/);
+  assert.match(html, /id="tokenReminderEnabledToggle"/);
+  assert.match(html, /id="tokenReminderIntervalInput"/);
+  assert.match(html, /id="tokenReminderWarnDaysInput"/);
+  assert.match(html, /id="tokenReminderModalHoursInput"/);
+  assert.match(html, /id="tokenReminderModal"/);
   assert.doesNotMatch(html, /id="spotlightApplyButton"/);
   assert.doesNotMatch(html, /id="spotlightRefreshButton"/);
+});
+
+test("loadTokenExpirySnapshot returns only OAuth profiles with finite expiry sorted by expiration", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-token-expiry-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const baseTime = Date.now();
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:late": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "late-access",
+        refresh: "late-refresh",
+        expires: baseTime + 60_000,
+        email: "late@example.com",
+      },
+      "openai-codex:early": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "early-access",
+        refresh: "early-refresh",
+        expires: baseTime + 10_000,
+        email: "early@example.com",
+      },
+      "openai-codex:no-expiry": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "missing-access",
+        refresh: "missing-refresh",
+        email: "missing@example.com",
+      },
+      "openai-codex:token-only": {
+        type: "token",
+        provider: "openai-codex",
+        token: "plain-token",
+        expires: baseTime + 5_000,
+        email: "token@example.com",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:late", "openai-codex:early"],
+    },
+  });
+
+  try {
+    const snapshot = await loadTokenExpirySnapshot({ stateDir, localStateDir, agent: "main" });
+
+    assert.equal(snapshot.localStore.exists, true);
+    assert.deepEqual(
+      snapshot.profiles.map((entry) => entry.profileId),
+      ["openai-codex:early", "openai-codex:late"],
+    );
+    assert.equal(snapshot.profiles[0].displayLabel, "early@example.com");
+    assert.equal(snapshot.profiles[1].displayLabel, "late@example.com");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
 });
 
 test("buildWarnings flags config order mismatch as informational warning", () => {

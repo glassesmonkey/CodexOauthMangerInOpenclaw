@@ -9,6 +9,7 @@ import {
   exportBundle,
   linkCurrentCodexToProfile,
   loadDashboardState,
+  loadTokenExpirySnapshot,
   previewImportBundle,
   renameProfile,
   rebuildRuntime,
@@ -85,6 +86,11 @@ export async function startDashboardServer(options = {}) {
 
       if (request.method === "GET" && url.pathname === "/api/state") {
         sendJson(response, 200, await loadDashboardState(options, createStateDeps(url)));
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/token-expiry") {
+        sendJson(response, 200, await loadTokenExpirySnapshot(options));
         return;
       }
 
