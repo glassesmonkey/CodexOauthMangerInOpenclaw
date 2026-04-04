@@ -197,6 +197,7 @@ export function renderHtml() {
       }
 
       .masthead {
+        overflow: visible;
         padding: 32px;
         background:
           linear-gradient(140deg, rgba(37, 24, 18, 0.95), rgba(55, 33, 23, 0.88)),
@@ -306,6 +307,8 @@ export function renderHtml() {
       }
 
       .toolbar-panel {
+        position: relative;
+        z-index: 4;
         display: grid;
         gap: 14px;
         justify-items: stretch;
@@ -451,6 +454,7 @@ export function renderHtml() {
       .toolbar-menu {
         position: relative;
         flex: 0 0 auto;
+        z-index: 6;
       }
 
       .toolbar-menu summary {
@@ -483,7 +487,7 @@ export function renderHtml() {
         position: absolute;
         right: 0;
         top: calc(100% + 10px);
-        z-index: 10;
+        z-index: 24;
         width: min(360px, calc(100vw - 32px));
         display: grid;
         gap: 14px;
@@ -563,7 +567,7 @@ export function renderHtml() {
 
       .summary-grid {
         position: relative;
-        z-index: 1;
+        z-index: 0;
         display: grid;
         gap: 16px;
         grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.82fr);
@@ -578,6 +582,7 @@ export function renderHtml() {
         border: 1px solid rgba(95, 68, 42, 0.14);
         background: var(--surface-strong);
         box-shadow: var(--shadow-soft);
+        color: var(--text);
       }
 
       .spotlight-card {
@@ -612,6 +617,8 @@ export function renderHtml() {
         margin-top: 4px;
         font-size: clamp(1.4rem, 2.6vw, 2rem);
         line-height: 1.08;
+        color: #3e2819;
+        text-shadow: 0 1px 0 rgba(255, 255, 255, 0.38);
       }
 
       .spotlight-id {
@@ -754,6 +761,7 @@ export function renderHtml() {
       .summary-card h3 {
         font-size: 1rem;
         line-height: 1.18;
+        color: #3e2819;
       }
 
       .summary-copy {
@@ -792,6 +800,7 @@ export function renderHtml() {
         font-family: var(--display);
         font-size: 1.12rem;
         line-height: 1.1;
+        color: #392515;
       }
 
       .stat-box.emphasis {
@@ -1451,8 +1460,8 @@ export function renderHtml() {
 
       .profile-card {
         display: grid;
-        gap: 14px;
-        padding: 20px;
+        gap: 12px;
+        padding: 18px 18px 16px;
         border-radius: var(--radius-lg);
         border: 1px solid rgba(95, 68, 42, 0.14);
         background:
@@ -1466,25 +1475,39 @@ export function renderHtml() {
         box-shadow: 0 20px 42px rgba(122, 44, 23, 0.14);
       }
 
+      .profile-card.top::before {
+        content: "";
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        top: 0;
+        height: 3px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(161, 69, 40, 0.94), rgba(227, 170, 88, 0.72));
+      }
+
       .profile-card.problem {
         border-color: rgba(162, 61, 49, 0.26);
       }
 
       .profile-head {
         display: flex;
-        gap: 12px;
-        align-items: center;
+        gap: 14px;
+        align-items: flex-start;
         justify-content: space-between;
       }
 
       .profile-main {
         min-width: 0;
+        display: grid;
+        gap: 6px;
       }
 
       .profile-header-meta {
         display: flex;
         gap: 8px;
         align-items: center;
+        flex-wrap: wrap;
         justify-content: space-between;
       }
 
@@ -1505,30 +1528,51 @@ export function renderHtml() {
 
       .profile-topline {
         display: flex;
-        gap: 10px;
-        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        align-items: baseline;
+      }
+
+      .profile-identity {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        align-items: baseline;
+        min-width: 0;
       }
 
       .profile-name {
         font-family: var(--display);
-        font-size: 1.28rem;
-        line-height: 1.04;
+        font-size: clamp(1.08rem, 1.6vw, 1.42rem);
+        line-height: 1.02;
         font-weight: 600;
+        color: #352114;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .profile-subline {
-        margin-top: 4px;
-        color: var(--muted);
-        font-size: 0.78rem;
-        line-height: 1.35;
+        margin-top: 0;
+        padding-top: 2px;
+        color: rgba(96, 73, 51, 0.84);
+        font-family: var(--mono);
+        font-size: 0.7rem;
+        line-height: 1.2;
       }
 
       .profile-state-row {
         display: flex;
         align-items: center;
         gap: 6px;
-        color: var(--muted);
-        font-size: 0.74rem;
+        min-height: 28px;
+        padding: 0 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(95, 68, 42, 0.1);
+        background: rgba(255, 251, 245, 0.66);
+        color: rgba(84, 63, 43, 0.9);
+        font-size: 0.73rem;
+        white-space: nowrap;
       }
 
       .state-dot {
@@ -1563,10 +1607,12 @@ export function renderHtml() {
       .profile-secondary-row {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px 12px;
+        gap: 8px 10px;
         align-items: center;
-        color: var(--muted);
-        font-size: 0.76rem;
+        min-width: 0;
+        color: rgba(96, 73, 51, 0.84);
+        font-size: 0.74rem;
+        line-height: 1.35;
       }
 
       .profile-secondary-row .order-pill {
@@ -1575,8 +1621,20 @@ export function renderHtml() {
         font-size: 0.74rem;
       }
 
+      .profile-inline-note {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        color: rgba(79, 58, 39, 0.86);
+        white-space: nowrap;
+      }
+
+      .profile-inline-note.strong {
+        font-weight: 600;
+      }
+
       .metric-card {
-        padding: 14px 14px 12px;
+        padding: 12px 14px 11px;
         border-radius: var(--radius-md);
         border: 1px solid rgba(95, 68, 42, 0.12);
         background: rgba(255, 251, 245, 0.88);
@@ -1596,15 +1654,16 @@ export function renderHtml() {
       }
 
       .metric-title {
-        margin: 0 0 8px;
-        font-size: 0.72rem;
-        letter-spacing: 0.04em;
-        color: var(--muted);
+        margin: 0 0 6px;
+        font-size: 0.68rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(95, 72, 50, 0.76);
       }
 
       .metric {
         display: grid;
-        gap: 8px;
+        gap: 6px;
       }
 
       .metric-head {
@@ -1615,7 +1674,8 @@ export function renderHtml() {
       }
 
       .metric strong {
-        font-size: 0.98rem;
+        font-size: 1.02rem;
+        line-height: 1;
       }
 
       .metric-label {
@@ -1623,7 +1683,7 @@ export function renderHtml() {
       }
 
       .metric-bar {
-        height: 8px;
+        height: 7px;
         overflow: hidden;
         border-radius: 999px;
         background: rgba(73, 48, 27, 0.1);
@@ -1666,8 +1726,8 @@ export function renderHtml() {
       }
 
       .metric-meta small {
-        color: var(--muted);
-        font-size: 0.72rem;
+        color: rgba(95, 72, 50, 0.8);
+        font-size: 0.71rem;
       }
 
       .countdown {
@@ -1695,15 +1755,23 @@ export function renderHtml() {
       .profile-actions {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 6px;
+        justify-content: flex-end;
+        gap: 8px;
+        flex: 0 0 auto;
       }
 
       .profile-actions .button-primary,
       .profile-actions .button-secondary,
       .profile-actions .button-ghost {
-        min-height: 38px;
+        min-height: 36px;
         padding: 9px 13px;
+      }
+
+      .profile-footer {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
       }
 
       .profile-menu {
@@ -1715,7 +1783,7 @@ export function renderHtml() {
         align-items: center;
         justify-content: center;
         min-width: 40px;
-        min-height: 38px;
+        min-height: 36px;
         padding: 0 12px;
         border-radius: 14px;
         border: 1px solid rgba(95, 68, 42, 0.12);
@@ -1998,6 +2066,16 @@ export function renderHtml() {
           justify-items: start;
         }
 
+        .profile-head,
+        .profile-footer {
+          display: grid;
+          grid-template-columns: 1fr;
+        }
+
+        .profile-header-meta {
+          justify-content: flex-start;
+        }
+
         .stat-grid.compact,
         .summary-meta,
         .profile-list,
@@ -2055,6 +2133,26 @@ export function renderHtml() {
 
         .toolbar-inline-hint {
           display: block;
+        }
+
+        .profile-card {
+          padding: 16px;
+        }
+
+        .profile-card.top::before {
+          left: 16px;
+          right: 16px;
+        }
+
+        .profile-topline,
+        .profile-identity,
+        .profile-secondary-row {
+          row-gap: 6px;
+        }
+
+        .profile-actions {
+          width: 100%;
+          justify-content: space-between;
         }
 
         .toolbar-menu-panel {
@@ -4012,17 +4110,19 @@ export function renderHtml() {
         const rank = document.createElement("div");
         rank.className = "rank-badge";
         rank.textContent = row.recommendedOrderIndex >= 0 ? "#" + String(row.recommendedOrderIndex + 1) : "--";
+        const identity = document.createElement("div");
+        identity.className = "profile-identity";
         const name = document.createElement("div");
         name.className = "profile-name";
         name.textContent = row.displayLabel;
-        topline.appendChild(rank);
-        topline.appendChild(name);
-        main.appendChild(topline);
-
         const subline = document.createElement("div");
         subline.className = "profile-subline";
         subline.textContent = row.profileId;
-        main.appendChild(subline);
+        topline.appendChild(rank);
+        identity.appendChild(name);
+        identity.appendChild(subline);
+        topline.appendChild(identity);
+        main.appendChild(topline);
 
         const headerMeta = document.createElement("div");
         headerMeta.className = "profile-header-meta";
@@ -4050,6 +4150,9 @@ export function renderHtml() {
         const mainMetric = renderMetric(row.secondary, "7 天额度", "primary-window profile-main-window");
         card.appendChild(mainMetric);
 
+        const footer = document.createElement("div");
+        footer.className = "profile-footer";
+
         const secondaryRow = document.createElement("div");
         secondaryRow.className = "profile-secondary-row";
         const shortWindow = createInfoPill(
@@ -4070,6 +4173,7 @@ export function renderHtml() {
         }
         if (row.plan) {
           const plan = document.createElement("span");
+          plan.className = "profile-inline-note";
           plan.textContent = row.plan;
           secondaryRow.appendChild(plan);
         }
@@ -4084,10 +4188,10 @@ export function renderHtml() {
         secondaryRow.appendChild(createInfoPill(codexPillLabel, codexPillTone));
         if (row.expiresAt) {
           const expiry = document.createElement("span");
+          expiry.className = "profile-inline-note strong";
           expiry.textContent = "到期 " + formatTime(row.expiresAt);
           secondaryRow.appendChild(expiry);
         }
-        card.appendChild(secondaryRow);
 
         if (row.error) {
           const errorText = document.createElement("div");
@@ -4195,7 +4299,9 @@ export function renderHtml() {
         });
         actions.appendChild(menu);
 
-        card.appendChild(actions);
+        footer.appendChild(secondaryRow);
+        footer.appendChild(actions);
+        card.appendChild(footer);
         return card;
       }
 
