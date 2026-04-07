@@ -2871,8 +2871,8 @@ export function renderHtml() {
         },
         apply: {
           label: "应用推荐",
-          description: "把推荐顺序写回本地号池，并导出到 OpenClaw runtime。",
-          mutates: "会更新本地顺序，并导出 OpenClaw runtime",
+          description: "把推荐顺序写回本地号池，并更新 OpenClaw runtime 里的 openai-codex 配置。",
+          mutates: "会更新本地顺序，并写回 OpenClaw runtime 的 codex 配置",
           safe: "不会切换 ~/.codex/auth.json",
         },
         add: {
@@ -2890,7 +2890,7 @@ export function renderHtml() {
         import: {
           label: "导入号池",
           description: "导入加密 bundle，先预览再合并到本地号池。",
-          mutates: "会更新本地号池，并重建运行文件",
+          mutates: "会更新本地号池，并同步 OpenClaw runtime 里的 codex 配置",
           safe: "不会直接无提示覆盖现有号池",
         },
         sync: {
@@ -2901,8 +2901,8 @@ export function renderHtml() {
         },
         rebuild: {
           label: "重建运行文件",
-          description: "按本地号池重新生成 OpenClaw 和 Codex runtime 文件。",
-          mutates: "会重写 auth-profiles.json 和 ~/.codex/auth.json",
+          description: "按本地号池重建 Codex runtime，并更新 OpenClaw runtime 里的 openai-codex 配置。",
+          mutates: "会更新 auth-profiles.json 里的 codex 配置，并重写 ~/.codex/auth.json",
           safe: "不会改动本地号池内容",
         },
         absorb: {
@@ -3261,6 +3261,13 @@ export function renderHtml() {
         return "info";
       }
 
+      function getRecommendedSelectionRow(data = appState.data) {
+        if (!data?.recommendedSelectionProfileId || !Array.isArray(data.rows)) {
+          return null;
+        }
+        return data.rows.find((row) => row.profileId === data.recommendedSelectionProfileId) || null;
+      }
+
       function getProfileAvailability(row) {
         const primaryRemaining = getRemainingPercent(row?.primary);
         const secondaryRemaining = getRemainingPercent(row?.secondary);
@@ -3288,6 +3295,15 @@ export function renderHtml() {
             leadLabel: "5h耗尽",
             leadTone: "danger",
             stateText: row?.primary?.resetAt ? "等待 5h 重置" : "5h 已耗尽",
+            stateTone: "low",
+          };
+        }
+
+        if (row?.recommendationEligible === false) {
+          return {
+            leadLabel: "暂不推荐",
+            leadTone: "warn",
+            stateText: "5h 余量过低，不参与自动推荐",
             stateTone: "low",
           };
         }
@@ -3672,6 +3688,7 @@ export function renderHtml() {
         return Boolean(
           appState.autoApplyRecommended &&
           data &&
+          data.recommendedSelectionProfileId &&
           Array.isArray(data.recommendedOrder) &&
           data.recommendedOrder.length > 0 &&
           !arraysEqual(data.recommendedOrder, data.currentEffectiveOrder),
@@ -4042,13 +4059,13 @@ export function renderHtml() {
         return wrapper;
       }
 
-      function buildSpotlightSummary(row) {
+      function buildSpotlightSummary(row, data = appState.data) {
         if (!row) {
           return {
-            title: "暂无可推荐账号",
-            detail: "等待账号数据",
+            title: "暂无可自动应用账号",
+            detail: data?.recommendedSelectionBlockedReason || "等待账号数据",
             tone: "warn",
-            tags: ["尚未读取"],
+            tags: [data?.recommendedSelectionBlockedReason ? "自动应用已暂停" : "尚未读取"],
           };
         }
 
@@ -4058,6 +4075,15 @@ export function renderHtml() {
             detail: "检查网络或重新登录",
             tone: "danger",
             tags: ["需要处理"],
+          };
+        }
+
+        if (row.recommendationEligible === false) {
+          return {
+            title: "暂不自动应用",
+            detail: row.recommendationBlockedReason || "当前账号不参与自动推荐",
+            tone: "warn",
+            tags: ["自动应用已跳过"],
           };
         }
 
@@ -4142,7 +4168,7 @@ export function renderHtml() {
           return "";
         }
         if (note.includes("Applying order only updates")) {
-          return "应用推荐顺序只会调整 OpenClaw 的实际顺序，不会改写 Codex 当前账号。";
+          return "应用推荐顺序只会更新 OpenClaw runtime 里的 codex 配置，不会改写 Codex 当前账号。";
         }
         if (note.includes("Setting a profile as current")) {
           return "“设为当前”会同时切换 OpenClaw 当前账号和 Codex 当前账号。";
@@ -4187,8 +4213,8 @@ export function renderHtml() {
         if (note.includes("Profiles still using :default should be renamed")) {
           return "这些账号名称还比较临时，建议改成更容易识别的名字: " + note.split(": ").slice(1).join(": ");
         }
-        if (note.includes("OpenClaw runtime auth-profiles.json has drifted")) {
-          return "OpenClaw runtime 账号文件已经偏离本地号池，建议重建运行文件。";
+        if (note.includes("OpenClaw runtime auth-profiles.json managed openai-codex entries have drifted")) {
+          return "OpenClaw runtime 里的 codex 配置已经偏离本地号池，建议重建运行文件。";
         }
         if (note.includes("Current ~/.codex/auth.json does not match any stored profile")) {
           return "当前 Codex 登录还没有纳入这个仓库，所以暂时不能统一切换。";
@@ -4493,10 +4519,10 @@ export function renderHtml() {
       }
 
       function renderSpotlight(data) {
-        const row = data?.rows?.[0] || null;
-        const summary = buildSpotlightSummary(row);
+        const row = getRecommendedSelectionRow(data);
+        const summary = buildSpotlightSummary(row, data);
         const remaining = getRemainingPercent(row?.secondary);
-        spotlightName.textContent = row ? row.displayLabel : "暂无推荐账号";
+        spotlightName.textContent = row ? row.displayLabel : "暂无可自动应用账号";
         spotlightProfileId.textContent = row ? row.profileId : "-";
         spotlightRank.textContent = row ? "01" : "--";
         spotlightReason.textContent = summary.title + " · " + summary.detail;
@@ -4659,6 +4685,12 @@ export function renderHtml() {
           errorText.className = "error-text";
           errorText.textContent = row.error;
           card.appendChild(errorText);
+        }
+        if (!row.error && row.recommendationEligible === false && row.recommendationBlockedReason) {
+          const recommendationHint = document.createElement("div");
+          recommendationHint.className = "error-text";
+          recommendationHint.textContent = row.recommendationBlockedReason;
+          card.appendChild(recommendationHint);
         }
         if (!row.codexCompatible && row.codexStatusReason) {
           const codexHint = document.createElement("div");
@@ -4921,7 +4953,9 @@ export function renderHtml() {
               skippedPrefix: fallbackMessage,
             })), "success");
           } else {
-            setBusy(false, formatRefreshSuccessMessage(data, okMessage), "success");
+            const blockedReason = data?.recommendedSelectionBlockedReason;
+            const message = blockedReason ? okMessage + "，" + blockedReason : okMessage;
+            setBusy(false, formatRefreshSuccessMessage(data, message), blockedReason ? "warn" : "success");
           }
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
@@ -4997,8 +5031,8 @@ export function renderHtml() {
       }
 
       async function applyRecommendedOrder() {
-        if (!appState.data?.recommendedOrder?.length) {
-          setFlash("当前没有可应用的推荐顺序。", "warn");
+        if (!appState.data?.recommendedOrder?.length || !appState.data?.recommendedSelectionProfileId) {
+          setFlash(appState.data?.recommendedSelectionBlockedReason || "当前没有可应用的推荐顺序。", "warn");
           return;
         }
         setBusy(true, "正在应用推荐顺序...", "info");
@@ -5061,11 +5095,11 @@ export function renderHtml() {
       }
 
       async function rebuildRuntimeFiles() {
-        setBusy(true, "正在重建运行文件...", "info");
+        setBusy(true, "正在更新 OpenClaw runtime 的 codex 配置...", "info");
         try {
           const data = await postJson("/api/rebuild-runtime");
           render(data);
-          setBusy(false, "运行文件已按本地号池重建", "success");
+          setBusy(false, "OpenClaw runtime 的 codex 配置已按本地号池更新", "success");
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }

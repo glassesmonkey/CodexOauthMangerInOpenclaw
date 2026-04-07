@@ -1,4 +1,5 @@
 import { dedupeStrings } from "./utils.js";
+import { PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT } from "./constants.js";
 
 function compareNullableDesc(left, right) {
   if (left == null && right == null) {
@@ -35,9 +36,41 @@ function compareExhaustedWindow(left, right) {
   return leftExhausted ? 1 : -1;
 }
 
+function isFinitePercent(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+export function isPrimaryRecommendationBlocked(remainingPercent) {
+  return isFinitePercent(remainingPercent) && remainingPercent <= PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT;
+}
+
+export function isSecondaryRecommendationBlocked(remainingPercent) {
+  return isFinitePercent(remainingPercent) && remainingPercent === 0;
+}
+
+export function isRecommendationEligible(row) {
+  return !getRecommendationBlockedReason(row);
+}
+
+export function getRecommendationBlockedReason(row) {
+  if (!row) {
+    return "账号数据不可用。";
+  }
+  if (row.error) {
+    return "额度读取失败，暂不参与自动推荐。";
+  }
+  if (isSecondaryRecommendationBlocked(row.secondary?.remainingPercent)) {
+    return "7天额度已耗尽，暂不参与自动推荐。";
+  }
+  if (isPrimaryRecommendationBlocked(row.primary?.remainingPercent)) {
+    return `5h 可用额度 <= ${PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT}%，暂不参与自动推荐。`;
+  }
+  return null;
+}
+
 function compareUnavailableProfile(left, right) {
-  const leftUnavailable = left.primary.remainingPercent === 0 || left.secondary.remainingPercent === 0;
-  const rightUnavailable = right.primary.remainingPercent === 0 || right.secondary.remainingPercent === 0;
+  const leftUnavailable = !isRecommendationEligible(left);
+  const rightUnavailable = !isRecommendationEligible(right);
   if (leftUnavailable === rightUnavailable) {
     return 0;
   }

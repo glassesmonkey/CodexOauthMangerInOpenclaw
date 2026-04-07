@@ -44,7 +44,13 @@ import {
 } from "./config-store.js";
 import { withFileLock } from "./file-lock.js";
 import { readJsonFile } from "./json-files.js";
-import { buildConfigAudit, buildWarnings, recommendProfileOrder } from "./order.js";
+import {
+  buildConfigAudit,
+  buildWarnings,
+  getRecommendationBlockedReason,
+  isRecommendationEligible,
+  recommendProfileOrder,
+} from "./order.js";
 import { resolvePaths } from "./paths.js";
 import { clearAutoAuthProfileOverrides, readSessionStore, writeSessionStore } from "./session-store.js";
 import { loadUsageRefreshBatch } from "./usage-refresh.js";
@@ -180,6 +186,33 @@ function createEmptyUsage(error = null) {
   };
 }
 
+function buildRecommendedSelection(rows, recommendedOrder) {
+  const rowsById = new Map(rows.map((row) => [row.profileId, row]));
+  for (const profileId of recommendedOrder) {
+    const row = rowsById.get(profileId);
+    if (row?.recommendationEligible) {
+      return {
+        profileId,
+        blockedReason: null,
+      };
+    }
+  }
+  const blockedReasons = recommendedOrder
+    .map((profileId) => rowsById.get(profileId)?.recommendationBlockedReason)
+    .filter((reason) => typeof reason === "string" && reason.trim());
+  const allBlockedByLowPrimaryQuota =
+    blockedReasons.length > 0 &&
+    blockedReasons.every((reason) => reason.includes("5h 可用额度 <="));
+  return {
+    profileId: null,
+    blockedReason: recommendedOrder.length === 0
+      ? null
+      : allBlockedByLowPrimaryQuota
+        ? "全部账号 5h 可用额度 <= 5%，暂不自动应用推荐顺序。"
+        : blockedReasons[0] || "当前没有可自动应用的推荐账号。",
+  };
+}
+
 function resolveUsageToken(credential) {
   if (credential?.type === "oauth") {
     if (typeof credential.access !== "string" || !credential.access.trim()) {
@@ -200,9 +233,9 @@ function resolveUsageToken(credential) {
 
 function createNotes() {
   return [
-    "The project-local store is the canonical source of truth. OpenClaw auth-profiles.json and ~/.codex/auth.json are generated runtime files.",
+    "The project-local store is the canonical source of truth. OpenClaw auth-profiles.json is only updated for openai-codex profiles, order, lastGood, and usageStats. ~/.codex/auth.json is also generated from the local store.",
     "Quota refresh and token keepalive are separate flows: quota refresh reloads usage and ranking, while token keepalive only renews OAuth credentials.",
-    "Applying order only updates the local store and OpenClaw runtime order. It does not switch ~/.codex/auth.json.",
+    "Applying order only updates the local store and the managed openai-codex slice in OpenClaw runtime. It does not switch ~/.codex/auth.json.",
     "Setting a profile as current writes both the OpenClaw runtime files and ~/.codex/auth.json, but only for Codex-compatible OAuth profiles.",
   ];
 }
@@ -299,7 +332,7 @@ function buildDashboardWarnings(baseWarnings, context, codexRuntime, runtimeAuth
   if (runtimeAuth?.error) {
     warnings.push(`Failed to read OpenClaw auth-profiles.json: ${runtimeAuth.error}`);
   } else if (localStoreReady && runtimeAuth?.drift) {
-    warnings.push("OpenClaw runtime auth-profiles.json has drifted from the local canonical store.");
+    warnings.push("OpenClaw runtime auth-profiles.json managed openai-codex entries have drifted from the local canonical store.");
   }
 
   if (codexRuntime.error) {
@@ -672,6 +705,7 @@ export async function loadDashboardState(options = {}, deps = {}) {
   const rankedRows = rows
     .map((row) => {
       const credential = profileMap.get(row.profileId);
+      const recommendationBlockedReason = getRecommendationBlockedReason(row);
       const codexCompatible = isCodexCompatibleCredential(credential);
       const codexStatusReason = getCodexCompatibilityIssue(credential);
       const canLinkCurrentCodex =
@@ -682,6 +716,8 @@ export async function loadDashboardState(options = {}, deps = {}) {
       return {
         ...row,
         recommendedOrderIndex: recommendedOrder.indexOf(row.profileId),
+        recommendationEligible: isRecommendationEligible(row),
+        recommendationBlockedReason,
         codexCompatible,
         codexStatusReason,
         canLinkCurrentCodex,
@@ -690,6 +726,7 @@ export async function loadDashboardState(options = {}, deps = {}) {
       };
     })
     .toSorted((left, right) => left.recommendedOrderIndex - right.recommendedOrderIndex);
+  const recommendedSelection = buildRecommendedSelection(rankedRows, recommendedOrder);
 
   const audit = buildConfigAudit({
     runtimeProfileIds,
@@ -719,6 +756,8 @@ export async function loadDashboardState(options = {}, deps = {}) {
     storedOrder,
     configOrder,
     recommendedOrder,
+    recommendedSelectionProfileId: recommendedSelection.profileId,
+    recommendedSelectionBlockedReason: recommendedSelection.blockedReason,
     rows: rankedRows,
     warnings,
     notes: createNotes(),

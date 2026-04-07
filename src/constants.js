@@ -9,6 +9,7 @@ export const DEFAULT_LOCAL_STATE_DIRNAME = ".local";
 export const DEFAULT_TIMEOUT_MS = 8_000;
 export const USAGE_CACHE_TTL_MS = 30_000;
 export const USAGE_FETCH_CONCURRENCY = 2;
+export const PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT = 5;
 export const LOCK_TIMEOUT_MS = 5_000;
 export const LOCK_RETRY_MS = 75;
 export const LOGIN_TASK_TTL_MS = 60 * 60 * 1_000;

@@ -17,6 +17,7 @@ import {
   applyOrder,
   bootstrapLocalStore,
   commitImportBundle,
+  deleteProfile,
   exportBundle,
   linkCurrentCodexToProfile,
   loadDashboardState,
@@ -168,6 +169,27 @@ test("recommendProfileOrder pushes profiles with exhausted 5h quota behind avail
       profileId: "openai-codex:beta",
       currentOrderIndex: 1,
       primary: { remainingPercent: 25, resetAt: 250 },
+      secondary: { remainingPercent: 20, resetAt: 500 },
+      error: null,
+    },
+  ]);
+
+  assert.deepEqual(order, ["openai-codex:beta", "openai-codex:alpha"]);
+});
+
+test("recommendProfileOrder pushes profiles with 5h remaining at or below 5 percent behind eligible profiles", () => {
+  const order = recommendProfileOrder([
+    {
+      profileId: "openai-codex:alpha",
+      currentOrderIndex: 0,
+      primary: { remainingPercent: 5, resetAt: 200 },
+      secondary: { remainingPercent: 90, resetAt: 300 },
+      error: null,
+    },
+    {
+      profileId: "openai-codex:beta",
+      currentOrderIndex: 1,
+      primary: { remainingPercent: 6, resetAt: 250 },
       secondary: { remainingPercent: 20, resetAt: 500 },
       error: null,
     },
@@ -523,6 +545,121 @@ test("applyOrder touches config and clears auto session overrides for older code
     assert.equal(sessions["agent:main:old"].authProfileOverride, undefined);
     assert.equal(sessions["agent:main:preferred"].authProfileOverride, "openai-codex:work");
     assert.equal(sessions["agent:main:user"].authProfileOverride, "openai-codex:default");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("applyOrder only overwrites the managed openai-codex slice in runtime auth-profiles", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-apply-runtime-scope-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+
+  fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
+    version: 2,
+    preserveMe: {
+      source: "runtime",
+    },
+    profiles: {
+      "openai:manual": {
+        type: "token",
+        provider: "openai",
+        token: "manual-token",
+      },
+      "openai-codex:default": {
+        type: "token",
+        provider: "openai-codex",
+        token: "runtime-default-token",
+      },
+      "openai-codex:work": {
+        type: "token",
+        provider: "openai-codex",
+        token: "runtime-work-token",
+      },
+    },
+    order: {
+      openai: ["openai:manual"],
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+    lastGood: {
+      openai: "openai:manual",
+      "openai-codex": "openai-codex:default",
+    },
+    usageStats: {
+      "openai:manual": {
+        totalRequests: 7,
+      },
+      "openai-codex:default": {
+        totalRequests: 1,
+      },
+    },
+  }, null, 2));
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "token",
+        provider: "openai-codex",
+        token: "local-default-token",
+      },
+      "openai-codex:work": {
+        type: "token",
+        provider: "openai-codex",
+        token: "local-work-token",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+    lastGood: {
+      "openai-codex": "openai-codex:default",
+    },
+    usageStats: {
+      "openai-codex:default": {
+        totalRequests: 11,
+      },
+      "openai-codex:work": {
+        totalRequests: 12,
+      },
+    },
+  });
+
+  try {
+    await applyOrder(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      ["openai-codex:work", "openai-codex:default"],
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 20, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 30, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    const runtimeRaw = JSON.parse(fs.readFileSync(path.join(agentDir, "auth-profiles.json"), "utf8"));
+    assert.deepEqual(runtimeRaw.preserveMe, { source: "runtime" });
+    assert.deepEqual(runtimeRaw.profiles["openai:manual"], {
+      type: "token",
+      provider: "openai",
+      token: "manual-token",
+    });
+    assert.deepEqual(runtimeRaw.order.openai, ["openai:manual"]);
+    assert.equal(runtimeRaw.lastGood.openai, "openai:manual");
+    assert.deepEqual(runtimeRaw.usageStats["openai:manual"], { totalRequests: 7 });
+
+    assert.deepEqual(runtimeRaw.order["openai-codex"], ["openai-codex:work", "openai-codex:default"]);
+    assert.equal(runtimeRaw.profiles["openai-codex:default"].token, "local-default-token");
+    assert.equal(runtimeRaw.profiles["openai-codex:work"].token, "local-work-token");
+    assert.deepEqual(runtimeRaw.usageStats["openai-codex:work"], { totalRequests: 12 });
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -1001,6 +1138,82 @@ test("loadDashboardState limits quota refresh concurrency to two remote requests
   }
 });
 
+test("loadDashboardState marks low 5h quota profiles as ineligible for automatic recommendation", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-low-quota-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:alpha": createOauthProfile({
+        access: "alpha-access",
+        refresh: "alpha-refresh",
+        accountId: "account-alpha",
+        email: "alpha@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "alpha-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:beta": createOauthProfile({
+        access: "beta-access",
+        refresh: "beta-refresh",
+        accountId: "account-beta",
+        email: "beta@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "beta-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:alpha", "openai-codex:beta"],
+    },
+  });
+
+  try {
+    const state = await loadDashboardState(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        fetchImpl: async (_url, options) => {
+          const token = options?.headers?.Authorization;
+          return {
+            ok: true,
+            async json() {
+              return {
+                rate_limit: token === "Bearer alpha-access"
+                  ? {
+                      primary_window: { used_percent: 95, reset_at: 200, limit_window_seconds: 18000 },
+                      secondary_window: { used_percent: 10, reset_at: 400, limit_window_seconds: 604800 },
+                    }
+                  : {
+                      primary_window: { used_percent: 80, reset_at: 250, limit_window_seconds: 18000 },
+                      secondary_window: { used_percent: 30, reset_at: 500, limit_window_seconds: 604800 },
+                    },
+              };
+            },
+          };
+        },
+      },
+    );
+
+    assert.deepEqual(state.recommendedOrder, ["openai-codex:beta", "openai-codex:alpha"]);
+    assert.equal(state.recommendedSelectionProfileId, "openai-codex:beta");
+    assert.equal(state.recommendedSelectionBlockedReason, null);
+
+    const alpha = state.rows.find((row) => row.profileId === "openai-codex:alpha");
+    const beta = state.rows.find((row) => row.profileId === "openai-codex:beta");
+    assert.equal(alpha?.recommendationEligible, false);
+    assert.match(alpha?.recommendationBlockedReason || "", /5h 可用额度 <= 5%/);
+    assert.equal(beta?.recommendationEligible, true);
+    assert.equal(beta?.recommendationBlockedReason, null);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("loadDashboardState reuses cached quota results within thirty seconds", async () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-cache-hit-"));
   const localStateDir = path.join(stateDir, ".local");
@@ -1245,6 +1458,76 @@ test("applyOrder reuses warm quota cache when it reloads dashboard state", async
     assert.equal(state.applyResult?.codexSelectionUpdated, false);
     assert.equal(state.usageRefreshMetrics.remoteFetchCount, 0);
     assert.equal(state.usageRefreshMetrics.cacheHitCount, 2);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("loadDashboardState blocks automatic recommendation when every profile has 5h remaining at or below 5 percent", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-all-low-quota-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:alpha": createOauthProfile({
+        access: "alpha-access",
+        refresh: "alpha-refresh",
+        accountId: "account-alpha",
+        email: "alpha@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "alpha-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:beta": createOauthProfile({
+        access: "beta-access",
+        refresh: "beta-refresh",
+        accountId: "account-beta",
+        email: "beta@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "beta-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:alpha", "openai-codex:beta"],
+    },
+  });
+
+  try {
+    const state = await loadDashboardState(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        fetchImpl: async (_url, options) => {
+          const token = options?.headers?.Authorization;
+          return {
+            ok: true,
+            async json() {
+              return {
+                rate_limit: token === "Bearer alpha-access"
+                  ? {
+                      primary_window: { used_percent: 95, reset_at: 200, limit_window_seconds: 18000 },
+                      secondary_window: { used_percent: 20, reset_at: 400, limit_window_seconds: 604800 },
+                    }
+                  : {
+                      primary_window: { used_percent: 97, reset_at: 250, limit_window_seconds: 18000 },
+                      secondary_window: { used_percent: 30, reset_at: 500, limit_window_seconds: 604800 },
+                    },
+              };
+            },
+          };
+        },
+      },
+    );
+
+    assert.deepEqual(state.recommendedOrder, ["openai-codex:alpha", "openai-codex:beta"]);
+    assert.equal(state.recommendedSelectionProfileId, null);
+    assert.equal(state.recommendedSelectionBlockedReason, "全部账号 5h 可用额度 <= 5%，暂不自动应用推荐顺序。");
+    assert.equal(state.rows.every((row) => row.recommendationEligible === false), true);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
