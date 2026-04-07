@@ -140,6 +140,26 @@ function sanitizeCredentialForRuntime(credential) {
   return runtimeCredential;
 }
 
+function isManagedCodexProfileId(profileId) {
+  return typeof profileId === "string" && profileId.startsWith(`${CODEX_PROVIDER}:`);
+}
+
+function normalizeManagedUsageStats(value) {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const usageStats = {};
+  for (const [profileId, stats] of Object.entries(value)) {
+    if (!isManagedCodexProfileId(profileId)) {
+      continue;
+    }
+    usageStats[profileId] = stats;
+  }
+
+  return Object.keys(usageStats).length > 0 ? usageStats : undefined;
+}
+
 export function buildLocalAuthStore(store, options = {}) {
   const includeMaintenance = options.includeMaintenance !== false;
 
@@ -159,20 +179,89 @@ export function buildRuntimeAuthStore(store) {
   const runtimeProfiles = {};
 
   for (const [profileId, credential] of Object.entries(localStore.profiles)) {
+    if (!isManagedCodexProfileId(profileId)) {
+      continue;
+    }
     runtimeProfiles[profileId] = sanitizeCredentialForRuntime(credential);
   }
+
+  const runtimeOrder = localStore.order?.[CODEX_PROVIDER]
+    ? {
+        [CODEX_PROVIDER]: localStore.order[CODEX_PROVIDER],
+      }
+    : undefined;
+  const runtimeLastGood = localStore.lastGood?.[CODEX_PROVIDER]
+    ? {
+        [CODEX_PROVIDER]: localStore.lastGood[CODEX_PROVIDER],
+      }
+    : undefined;
 
   return {
     version: RUNTIME_AUTH_STORE_VERSION,
     profiles: runtimeProfiles,
-    order: localStore.order,
-    lastGood: localStore.lastGood,
-    usageStats: localStore.usageStats,
+    order: runtimeOrder,
+    lastGood: runtimeLastGood,
+    usageStats: normalizeManagedUsageStats(localStore.usageStats),
   };
 }
 
+export function mergeRuntimeAuthStore(runtimeStore, store) {
+  const managedRuntime = buildRuntimeAuthStore(store);
+  const nextRuntime = isRecord(runtimeStore) ? structuredClone(runtimeStore) : {};
+
+  const nextProfiles = isRecord(nextRuntime.profiles) ? { ...nextRuntime.profiles } : {};
+  for (const profileId of Object.keys(nextProfiles)) {
+    if (isManagedCodexProfileId(profileId)) {
+      delete nextProfiles[profileId];
+    }
+  }
+  Object.assign(nextProfiles, managedRuntime.profiles);
+  nextRuntime.profiles = nextProfiles;
+
+  const nextOrder = isRecord(nextRuntime.order) ? { ...nextRuntime.order } : {};
+  delete nextOrder[CODEX_PROVIDER];
+  if (managedRuntime.order?.[CODEX_PROVIDER]) {
+    nextOrder[CODEX_PROVIDER] = managedRuntime.order[CODEX_PROVIDER];
+  }
+  if (Object.keys(nextOrder).length > 0) {
+    nextRuntime.order = nextOrder;
+  } else {
+    delete nextRuntime.order;
+  }
+
+  const nextLastGood = isRecord(nextRuntime.lastGood) ? { ...nextRuntime.lastGood } : {};
+  delete nextLastGood[CODEX_PROVIDER];
+  if (managedRuntime.lastGood?.[CODEX_PROVIDER]) {
+    nextLastGood[CODEX_PROVIDER] = managedRuntime.lastGood[CODEX_PROVIDER];
+  }
+  if (Object.keys(nextLastGood).length > 0) {
+    nextRuntime.lastGood = nextLastGood;
+  } else {
+    delete nextRuntime.lastGood;
+  }
+
+  const nextUsageStats = isRecord(nextRuntime.usageStats) ? { ...nextRuntime.usageStats } : {};
+  for (const profileId of Object.keys(nextUsageStats)) {
+    if (isManagedCodexProfileId(profileId)) {
+      delete nextUsageStats[profileId];
+    }
+  }
+  if (managedRuntime.usageStats) {
+    Object.assign(nextUsageStats, managedRuntime.usageStats);
+  }
+  if (Object.keys(nextUsageStats).length > 0) {
+    nextRuntime.usageStats = nextUsageStats;
+  } else {
+    delete nextRuntime.usageStats;
+  }
+
+  nextRuntime.version = RUNTIME_AUTH_STORE_VERSION;
+  return nextRuntime;
+}
+
 export function writeRuntimeAuthStore(authStorePath, store) {
-  writeJsonFileAtomic(authStorePath, buildRuntimeAuthStore(store));
+  const existingRuntime = readJsonObject(authStorePath, {});
+  writeJsonFileAtomic(authStorePath, mergeRuntimeAuthStore(existingRuntime, store));
 }
 
 export function listCodexProfiles(store) {

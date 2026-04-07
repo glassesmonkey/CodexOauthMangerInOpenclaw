@@ -1022,6 +1022,120 @@ test("switchProfile writes projected ~/.codex/auth.json for Codex-compatible pro
   }
 });
 
+test("deleteProfile only removes managed openai-codex runtime entries", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-delete-runtime-scope-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+
+  fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
+    version: 2,
+    profiles: {
+      "openai:manual": {
+        type: "token",
+        provider: "openai",
+        token: "manual-token",
+      },
+      "openai-codex:default": {
+        type: "token",
+        provider: "openai-codex",
+        token: "default-token",
+      },
+      "openai-codex:work": {
+        type: "token",
+        provider: "openai-codex",
+        token: "work-token",
+      },
+    },
+    order: {
+      openai: ["openai:manual"],
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+    lastGood: {
+      openai: "openai:manual",
+      "openai-codex": "openai-codex:work",
+    },
+    usageStats: {
+      "openai:manual": {
+        totalRequests: 7,
+      },
+      "openai-codex:default": {
+        totalRequests: 1,
+      },
+      "openai-codex:work": {
+        totalRequests: 2,
+      },
+    },
+  }, null, 2));
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "token",
+        provider: "openai-codex",
+        token: "default-token",
+      },
+      "openai-codex:work": {
+        type: "token",
+        provider: "openai-codex",
+        token: "work-token",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+    lastGood: {
+      "openai-codex": "openai-codex:work",
+    },
+    usageStats: {
+      "openai-codex:default": {
+        totalRequests: 1,
+      },
+      "openai-codex:work": {
+        totalRequests: 2,
+      },
+    },
+  });
+
+  try {
+    await deleteProfile(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      "openai-codex:work",
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    const runtimeRaw = JSON.parse(fs.readFileSync(path.join(agentDir, "auth-profiles.json"), "utf8"));
+    assert.deepEqual(runtimeRaw.profiles["openai:manual"], {
+      type: "token",
+      provider: "openai",
+      token: "manual-token",
+    });
+    assert.deepEqual(runtimeRaw.order.openai, ["openai:manual"]);
+    assert.equal(runtimeRaw.lastGood.openai, "openai:manual");
+    assert.deepEqual(runtimeRaw.usageStats["openai:manual"], { totalRequests: 7 });
+
+    assert.equal(runtimeRaw.profiles["openai-codex:work"], undefined);
+    assert.deepEqual(runtimeRaw.order["openai-codex"], ["openai-codex:default"]);
+    assert.equal(runtimeRaw.lastGood["openai-codex"], undefined);
+    assert.equal(runtimeRaw.usageStats["openai-codex:work"], undefined);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("loadDashboardState does not implicitly refresh OAuth credentials", async () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-state-"));
   const localStateDir = path.join(stateDir, ".local");
@@ -1076,6 +1190,94 @@ test("loadDashboardState does not implicitly refresh OAuth credentials", async (
     assert.equal(refreshCalls, 0);
     const store = readAuthStore(path.join(localStateDir, "auth-store.json"));
     assert.equal(store.profiles["openai-codex:default"].access, "stale-access");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("loadDashboardState ignores runtime drift outside the managed openai-codex slice", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-runtime-drift-scope-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "token",
+        provider: "openai-codex",
+        token: "default-token",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default"],
+    },
+    lastGood: {
+      "openai-codex": "openai-codex:default",
+    },
+    usageStats: {
+      "openai-codex:default": {
+        totalRequests: 1,
+      },
+    },
+  });
+
+  fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
+    version: 2,
+    profiles: {
+      "openai:manual": {
+        type: "token",
+        provider: "openai",
+        token: "manual-token",
+      },
+      "openai-codex:default": {
+        type: "token",
+        provider: "openai-codex",
+        token: "default-token",
+      },
+    },
+    order: {
+      openai: ["openai:manual"],
+      "openai-codex": ["openai-codex:default"],
+    },
+    lastGood: {
+      openai: "openai:manual",
+      "openai-codex": "openai-codex:default",
+    },
+    usageStats: {
+      "openai:manual": {
+        totalRequests: 99,
+      },
+      "openai-codex:default": {
+        totalRequests: 1,
+      },
+    },
+  }, null, 2));
+
+  try {
+    const state = await loadDashboardState(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    assert.equal(state.runtimeAuth.drift, false);
+    assert.equal(
+      state.warnings.some((warning) => warning.includes("managed openai-codex entries have drifted")),
+      false,
+    );
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -1616,6 +1818,102 @@ test("runTokenKeepalive refreshes OAuth profiles, updates maintenance, and rewri
     const codexAuth = readCodexAuthFile(codexAuthPath);
     assert.equal(codexAuth.tokens.accessToken, "next-default-refresh");
     assert.equal(codexAuth.tokens.refreshToken, "next-default-refresh");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("runTokenKeepalive preserves unrelated runtime entries while refreshing codex profiles", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-keepalive-runtime-scope-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+
+  fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
+    version: 2,
+    profiles: {
+      "openai:manual": {
+        type: "token",
+        provider: "openai",
+        token: "manual-token",
+      },
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "stale-access",
+        refresh: "stale-refresh",
+        expires: Date.now() - 1_000,
+        accountId: "account-default",
+        email: "default@example.com",
+      },
+    },
+    order: {
+      openai: ["openai:manual"],
+      "openai-codex": ["openai-codex:default"],
+    },
+    usageStats: {
+      "openai:manual": {
+        totalRequests: 7,
+      },
+    },
+  }, null, 2));
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "stale-access",
+        refresh: "stale-refresh",
+        expires: Date.now() - 1_000,
+        accountId: "account-default",
+        email: "default@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "default-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default"],
+    },
+  });
+
+  try {
+    await runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        refreshImpl: async () => ({
+          access: "next-access",
+          refresh: "next-refresh",
+          expires: Date.now() + 60_000,
+        }),
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 12, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 22, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    const runtimeRaw = JSON.parse(fs.readFileSync(path.join(agentDir, "auth-profiles.json"), "utf8"));
+    assert.deepEqual(runtimeRaw.profiles["openai:manual"], {
+      type: "token",
+      provider: "openai",
+      token: "manual-token",
+    });
+    assert.deepEqual(runtimeRaw.order.openai, ["openai:manual"]);
+    assert.deepEqual(runtimeRaw.usageStats["openai:manual"], { totalRequests: 7 });
+    assert.equal(runtimeRaw.profiles["openai-codex:default"].access, "next-access");
+    assert.equal(runtimeRaw.profiles["openai-codex:default"].refresh, "next-refresh");
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
