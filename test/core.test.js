@@ -23,11 +23,12 @@ import {
   loadDashboardState,
   loadTokenExpirySnapshot,
   LoginManager,
-  previewImportBundle,
-  runTokenKeepalive,
-  switchProfile,
-  waitForOpenAICallbackPort,
-} from "../src/state.js";
+    previewImportBundle,
+    runTokenKeepalive,
+    switchCodexProfile,
+    switchProfile,
+    waitForOpenAICallbackPort,
+  } from "../src/state.js";
 import { renderHtml } from "../src/ui.js";
 import { createUsageFetch, resolveUsageProxyUrl } from "../src/usage-fetch.js";
 import { clearUsageRefreshCache } from "../src/usage-refresh.js";
@@ -1022,6 +1023,104 @@ test("switchProfile writes projected ~/.codex/auth.json for Codex-compatible pro
   }
 });
 
+test("switchCodexProfile rewrites only Codex auth while leaving OpenClaw order untouched", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-switch-codex-only-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+
+  fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
+    version: 2,
+    profiles: {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "default-access",
+        refresh: "default-refresh",
+        accountId: "account-default",
+      },
+      "openai-codex:work": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "work-access",
+        refresh: "work-refresh",
+        accountId: "account-work",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+  }, null, 2));
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "default-access",
+        refresh: "default-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "account-default",
+        email: "default@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "default-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+      "openai-codex:work": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "work-access",
+        refresh: "work-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "account-work",
+        email: "work@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "work-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+  });
+
+  try {
+    await switchCodexProfile(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      "openai-codex:work",
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    const runtimeStore = readAuthStore(path.join(agentDir, "auth-profiles.json"));
+    assert.deepEqual(runtimeStore.order["openai-codex"], ["openai-codex:default", "openai-codex:work"]);
+
+    const codexAuth = readCodexAuthFile(codexAuthPath);
+    assert.ok(codexAuth);
+    assert.equal(codexAuth.tokens.idToken, "work-id-token");
+    assert.equal(codexAuth.tokens.accessToken, "work-access");
+    assert.equal(codexAuth.tokens.refreshToken, "work-refresh");
+    assert.equal(codexAuth.tokens.accountId, "account-work");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("deleteProfile only removes managed openai-codex runtime entries", async () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-delete-runtime-scope-"));
   const localStateDir = path.join(stateDir, ".local");
@@ -1490,6 +1589,209 @@ test("loadDashboardState reuses cached quota results within thirty seconds", asy
     assert.equal(secondState.usageRefreshMetrics.remoteFetchCount, 0);
     assert.equal(secondState.usageRefreshMetrics.cacheHitCount, 2);
     assert.equal(secondState.rows[0].secondary.usedPercent, firstState.rows[0].secondary.usedPercent);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("loadDashboardState recommends a separate Codex profile and avoids the OpenClaw top account", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-codex-recommend-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:alpha": createOauthProfile({
+        access: "alpha-access",
+        refresh: "alpha-refresh",
+        accountId: "account-alpha",
+        email: "alpha@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "alpha-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:beta": createOauthProfile({
+        access: "beta-access",
+        refresh: "beta-refresh",
+        accountId: "account-beta",
+        email: "beta@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "beta-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:gamma": createOauthProfile({
+        access: "gamma-access",
+        refresh: "gamma-refresh",
+        accountId: "account-gamma",
+        email: "gamma@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "gamma-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:alpha", "openai-codex:beta", "openai-codex:gamma"],
+    },
+  });
+
+  try {
+    const state = await loadDashboardState(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        fetchImpl: async (_url, options) => {
+          const token = options?.headers?.Authorization;
+          return {
+            ok: true,
+            async json() {
+              if (token === "Bearer alpha-access") {
+                return {
+                  rate_limit: {
+                    primary_window: { used_percent: 20, reset_at: 200, limit_window_seconds: 18000 },
+                    secondary_window: { used_percent: 10, reset_at: 100, limit_window_seconds: 604800 },
+                  },
+                };
+              }
+              if (token === "Bearer beta-access") {
+                return {
+                  rate_limit: {
+                    primary_window: { used_percent: 10, reset_at: 300, limit_window_seconds: 18000 },
+                    secondary_window: { used_percent: 60, reset_at: 500, limit_window_seconds: 604800 },
+                  },
+                };
+              }
+              return {
+                rate_limit: {
+                  primary_window: { used_percent: 40, reset_at: 250, limit_window_seconds: 18000 },
+                  secondary_window: { used_percent: 10, reset_at: 110, limit_window_seconds: 604800 },
+                },
+              };
+            },
+          };
+        },
+      },
+    );
+
+    assert.equal(state.recommendedSelectionProfileId, "openai-codex:alpha");
+    assert.equal(state.codexRecommendedProfileId, "openai-codex:beta");
+    assert.equal(state.codexWouldDivergeFromOpenClaw, true);
+    assert.equal(state.codexRecommendedBlockedReason, null);
+
+    const alpha = state.rows.find((row) => row.profileId === "openai-codex:alpha");
+    const beta = state.rows.find((row) => row.profileId === "openai-codex:beta");
+    assert.equal(alpha?.codexRecommended, false);
+    assert.equal(beta?.codexRecommended, true);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("loadDashboardState suggests an independent Codex switch only when the current Codex account is low on quota", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-codex-low-quota-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(path.dirname(codexAuthPath), { recursive: true });
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:alpha": createOauthProfile({
+        access: "alpha-access",
+        refresh: "alpha-refresh",
+        accountId: "account-alpha",
+        email: "alpha@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "alpha-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:beta": createOauthProfile({
+        access: "beta-access",
+        refresh: "beta-refresh",
+        accountId: "account-beta",
+        email: "beta@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "beta-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:gamma": createOauthProfile({
+        access: "gamma-access",
+        refresh: "gamma-refresh",
+        accountId: "account-gamma",
+        email: "gamma@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "gamma-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:alpha", "openai-codex:beta", "openai-codex:gamma"],
+    },
+  });
+
+  fs.writeFileSync(codexAuthPath, JSON.stringify({
+    auth_mode: "chatgpt",
+    OPENAI_API_KEY: null,
+    tokens: {
+      id_token: "beta-id-token",
+      access_token: "beta-access",
+      refresh_token: "beta-refresh",
+      account_id: "account-beta",
+    },
+    last_refresh: "2026-04-02T18:02:46.501Z",
+  }, null, 2));
+
+  try {
+    const state = await loadDashboardState(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        fetchImpl: async (_url, options) => {
+          const token = options?.headers?.Authorization;
+          return {
+            ok: true,
+            async json() {
+              if (token === "Bearer alpha-access") {
+                return {
+                  rate_limit: {
+                    primary_window: { used_percent: 20, reset_at: 200, limit_window_seconds: 18000 },
+                    secondary_window: { used_percent: 15, reset_at: 100, limit_window_seconds: 604800 },
+                  },
+                };
+              }
+              if (token === "Bearer beta-access") {
+                return {
+                  rate_limit: {
+                    primary_window: { used_percent: 96, reset_at: 300, limit_window_seconds: 18000 },
+                    secondary_window: { used_percent: 20, reset_at: 500, limit_window_seconds: 604800 },
+                  },
+                };
+              }
+              return {
+                rate_limit: {
+                  primary_window: { used_percent: 35, reset_at: 250, limit_window_seconds: 18000 },
+                  secondary_window: { used_percent: 25, reset_at: 110, limit_window_seconds: 604800 },
+                },
+              };
+            },
+          };
+        },
+      },
+    );
+
+    assert.equal(state.codexAuth.linkedProfileId, "openai-codex:beta");
+    assert.equal(state.codexCurrentLowQuota, true);
+    assert.equal(state.codexRecommendedProfileId, "openai-codex:gamma");
+    assert.equal(state.codexAutoSwitchSuggested, true);
+    assert.match(state.codexAutoSwitchReason || "", /openai-codex:gamma/);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -1992,6 +2294,10 @@ test("renderHtml exposes accounts view toggle and compact toolbar structure", ()
   assert.match(html, /id="tokenReminderWarnDaysInput"/);
   assert.match(html, /id="tokenReminderModalHoursInput"/);
   assert.match(html, /id="tokenReminderModal"/);
+  assert.match(html, /id="codexAutomationShared"/);
+  assert.match(html, /id="codexAutomationIndependent"/);
+  assert.match(html, /id="codexAutomationManual"/);
+  assert.match(html, /codex-auth-dashboard\.codex-automation-mode/);
   assert.doesNotMatch(html, /id="spotlightApplyButton"/);
   assert.doesNotMatch(html, /id="spotlightRefreshButton"/);
 });

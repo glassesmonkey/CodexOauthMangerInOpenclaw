@@ -14,6 +14,7 @@ import {
   renameProfile,
   rebuildRuntime,
   runTokenKeepalive,
+  switchCodexProfile,
   switchProfile,
   syncConfig,
 } from "./state.js";
@@ -160,6 +161,17 @@ export async function startDashboardServer(options = {}) {
           return;
         }
         sendJson(response, 200, await switchProfile(options, profileId, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/switch-codex-profile") {
+        const body = await readBody(request);
+        const profileId = typeof body.profileId === "string" ? body.profileId.trim() : "";
+        if (!profileId) {
+          sendJson(response, 400, { error: "profileId is required." });
+          return;
+        }
+        sendJson(response, 200, await switchCodexProfile(options, profileId, createStateDeps(url, body)));
         return;
       }
 

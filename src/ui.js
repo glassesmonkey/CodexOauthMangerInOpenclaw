@@ -1416,6 +1416,11 @@ export function renderHtml() {
         font-size: 0.92rem;
       }
 
+      .radio-list {
+        display: grid;
+        gap: 8px;
+      }
+
       .profile-list {
         display: grid;
         gap: 16px;
@@ -2547,6 +2552,35 @@ export function renderHtml() {
 
                 <div class="settings-section">
                   <label class="field">
+                    <span class="field-label">Codex 自动化模式</span>
+                    <div class="radio-list" role="radiogroup" aria-label="Codex 自动化模式">
+                      <label class="toggle">
+                        <input id="codexAutomationShared" type="radio" name="codexAutomationMode" value="shared" />
+                        <span>
+                          <strong>共享模式</strong>
+                          <span class="field-note">自动应用推荐时，Codex 跟 OpenClaw 一起切换。</span>
+                        </span>
+                      </label>
+                      <label class="toggle">
+                        <input id="codexAutomationIndependent" type="radio" name="codexAutomationMode" value="independent-low-quota" />
+                        <span>
+                          <strong>独立避让</strong>
+                          <span class="field-note">Codex 避开 OpenClaw 第一名，只有当前 Codex 额度偏低时才自动切换。</span>
+                        </span>
+                      </label>
+                      <label class="toggle">
+                        <input id="codexAutomationManual" type="radio" name="codexAutomationMode" value="manual" />
+                        <span>
+                          <strong>仅手动</strong>
+                          <span class="field-note">展示 Codex 推荐，但不自动改写 <code>~/.codex/auth.json</code>。</span>
+                        </span>
+                      </label>
+                    </div>
+                  </label>
+                </div>
+
+                <div class="settings-section">
+                  <label class="field">
                     <span class="field-label">代理 URL</span>
                     <input id="usageProxyUrlInput" class="input" type="text" value="" placeholder="http://127.0.0.1:7890" />
                     <span class="field-note">留空则沿用系统代理</span>
@@ -2739,6 +2773,9 @@ export function renderHtml() {
         tokenReminderPendingModalProfiles: [],
         tokenReminderSeen: {},
         autoApplyRecommended: false,
+        codexAutomationMode: "shared",
+        codexRestartRequired: false,
+        codexRestartMessage: "",
         usageProxyEnabled: false,
         usageProxyUrl: "",
         activeTab: "accounts",
@@ -2757,6 +2794,7 @@ export function renderHtml() {
       const TOKEN_REMINDER_MODAL_HOURS_STORAGE_KEY = "codex-auth-dashboard.token-reminder-modal-hours";
       const TOKEN_REMINDER_SEEN_STORAGE_KEY = "codex-auth-dashboard.token-reminder-seen";
       const AUTO_APPLY_STORAGE_KEY = "codex-auth-dashboard.auto-apply-after-refresh";
+      const CODEX_AUTOMATION_MODE_STORAGE_KEY = "codex-auth-dashboard.codex-automation-mode";
       const USAGE_PROXY_ENABLED_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-enabled";
       const USAGE_PROXY_URL_STORAGE_KEY = "codex-auth-dashboard.usage-proxy-url";
       const ACTIVE_TAB_STORAGE_KEY = "codex-auth-dashboard.active-tab";
@@ -2801,6 +2839,7 @@ export function renderHtml() {
       const tokenReminderEarliestValue = document.getElementById("tokenReminderEarliestValue");
       const usageProxyUrlInput = document.getElementById("usageProxyUrlInput");
       const autoApplyToggle = document.getElementById("autoApplyToggle");
+      const codexAutomationModeInputs = Array.from(document.querySelectorAll('input[name="codexAutomationMode"]'));
       const usageProxyToggle = document.getElementById("usageProxyToggle");
       const spotlightName = document.getElementById("spotlightName");
       const spotlightProfileId = document.getElementById("spotlightProfileId");
@@ -2872,8 +2911,8 @@ export function renderHtml() {
         apply: {
           label: "应用推荐",
           description: "把推荐顺序写回本地号池，并更新 OpenClaw runtime 里的 openai-codex 配置。",
-          mutates: "会更新本地顺序，并写回 OpenClaw runtime 的 codex 配置",
-          safe: "不会切换 ~/.codex/auth.json",
+          mutates: "会更新本地顺序，并写回 OpenClaw runtime；共享模式下也可能同步 Codex",
+          safe: "独立避让和仅手动模式不会自动切换 Codex 当前账号",
         },
         add: {
           label: "新增账号",
@@ -3268,6 +3307,39 @@ export function renderHtml() {
         return data.rows.find((row) => row.profileId === data.recommendedSelectionProfileId) || null;
       }
 
+      function getOpenClawCurrentRow(data = appState.data) {
+        if (!Array.isArray(data?.rows)) {
+          return null;
+        }
+        return data.rows.find((row) => row.openClawCurrent) || null;
+      }
+
+      function getCodexCurrentRow(data = appState.data) {
+        if (!Array.isArray(data?.rows)) {
+          return null;
+        }
+        return data.rows.find((row) => row.codexCurrent) || null;
+      }
+
+      function getCodexRecommendedRow(data = appState.data) {
+        if (!data?.codexRecommendedProfileId || !Array.isArray(data.rows)) {
+          return null;
+        }
+        return data.rows.find((row) => row.profileId === data.codexRecommendedProfileId) || null;
+      }
+
+      function isSharedCodexAutomationMode() {
+        return appState.codexAutomationMode === "shared";
+      }
+
+      function isIndependentCodexAutomationMode() {
+        return appState.codexAutomationMode === "independent-low-quota";
+      }
+
+      function needsCodexRestartBanner() {
+        return Boolean(appState.codexRestartRequired && appState.codexRestartMessage);
+      }
+
       function getProfileAvailability(row) {
         const primaryRemaining = getRemainingPercent(row?.primary);
         const secondaryRemaining = getRemainingPercent(row?.secondary);
@@ -3509,6 +3581,7 @@ export function renderHtml() {
           window.localStorage.setItem(TOKEN_REMINDER_WARN_DAYS_STORAGE_KEY, String(appState.tokenReminderWarnDays));
           window.localStorage.setItem(TOKEN_REMINDER_MODAL_HOURS_STORAGE_KEY, String(appState.tokenReminderModalHours));
           window.localStorage.setItem(AUTO_APPLY_STORAGE_KEY, String(appState.autoApplyRecommended));
+          window.localStorage.setItem(CODEX_AUTOMATION_MODE_STORAGE_KEY, appState.codexAutomationMode);
           window.localStorage.setItem(USAGE_PROXY_ENABLED_STORAGE_KEY, String(appState.usageProxyEnabled));
           window.localStorage.setItem(USAGE_PROXY_URL_STORAGE_KEY, appState.usageProxyUrl);
           window.localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, appState.activeTab);
@@ -3527,6 +3600,9 @@ export function renderHtml() {
         tokenReminderModalHoursInput.value = String(appState.tokenReminderModalHours);
         usageProxyUrlInput.value = appState.usageProxyUrl;
         autoApplyToggle.checked = appState.autoApplyRecommended;
+        codexAutomationModeInputs.forEach((input) => {
+          input.checked = input.value === appState.codexAutomationMode;
+        });
         usageProxyToggle.checked = appState.usageProxyEnabled;
         renderTokenRefreshStatus();
       }
@@ -3562,6 +3638,10 @@ export function renderHtml() {
           const storedReminderEnabled = window.localStorage.getItem(TOKEN_REMINDER_ENABLED_STORAGE_KEY);
           appState.tokenReminderEnabled = storedReminderEnabled !== "false";
           appState.autoApplyRecommended = window.localStorage.getItem(AUTO_APPLY_STORAGE_KEY) === "true";
+          const storedCodexAutomationMode = window.localStorage.getItem(CODEX_AUTOMATION_MODE_STORAGE_KEY);
+          if (storedCodexAutomationMode === "shared" || storedCodexAutomationMode === "independent-low-quota" || storedCodexAutomationMode === "manual") {
+            appState.codexAutomationMode = storedCodexAutomationMode;
+          }
           appState.usageProxyEnabled = window.localStorage.getItem(USAGE_PROXY_ENABLED_STORAGE_KEY) === "true";
           appState.usageProxyUrl = window.localStorage.getItem(USAGE_PROXY_URL_STORAGE_KEY) || "";
           const activeTab = window.localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
@@ -3581,6 +3661,7 @@ export function renderHtml() {
           appState.tokenReminderModalHours = 6;
           appState.tokenReminderSeen = {};
           appState.autoApplyRecommended = false;
+          appState.codexAutomationMode = "shared";
           appState.usageProxyEnabled = false;
           appState.usageProxyUrl = "";
           appState.activeTab = "accounts";
@@ -3795,6 +3876,9 @@ export function renderHtml() {
         tokenReminderWarnDaysInput.disabled = disabled || !storeReady || !appState.tokenReminderEnabled;
         tokenReminderModalHoursInput.disabled = disabled || !storeReady || !appState.tokenReminderEnabled;
         autoApplyToggle.disabled = disabled;
+        codexAutomationModeInputs.forEach((input) => {
+          input.disabled = disabled;
+        });
         usageProxyToggle.disabled = disabled;
         usageProxyUrlInput.disabled = disabled;
         addProfileSuffixInput.disabled = disabled || loginInProgress;
@@ -4167,8 +4251,8 @@ export function renderHtml() {
         if (!note) {
           return "";
         }
-        if (note.includes("Applying order only updates")) {
-          return "应用推荐顺序只会更新 OpenClaw runtime 里的 codex 配置，不会改写 Codex 当前账号。";
+        if (note.includes("Applying order updates")) {
+          return "应用推荐会更新 OpenClaw runtime；只有显式要求同步时才会改写 Codex 当前账号。";
         }
         if (note.includes("Setting a profile as current")) {
           return "“设为当前”会同时切换 OpenClaw 当前账号和 Codex 当前账号。";
@@ -4223,7 +4307,7 @@ export function renderHtml() {
           return "当前 Codex 登录和多个仓库账号重复，系统无法安全自动关联。";
         }
         if (note.includes("Current ~/.codex/auth.json has drifted")) {
-          return "当前 Codex auth 和本地号池的目标账号不一致，建议重新设为当前或重建运行文件。";
+          return "当前 Codex auth 和它关联的仓库账号内容不一致，建议重新同步 Codex 或重建运行文件。";
         }
         if (note.includes("Failed to read ~/.codex/auth.json")) {
           return "读取 Codex 当前登录失败: " + note.split(": ").slice(1).join(": ");
@@ -4335,6 +4419,57 @@ export function renderHtml() {
           items.push((earliest.displayLabel || earliest.profileId) + " · " + describeTokenExpiry(earliest));
         }
         return createAlertCard("Token 到期提醒", tone, items);
+      }
+
+      function createSelectionStatusAlertCard(data) {
+        const openClawCurrent = getOpenClawCurrentRow(data);
+        const codexCurrent = getCodexCurrentRow(data);
+        const tone = data?.codexWouldDivergeFromOpenClaw ? "warn" : "ok";
+        return createAlertCard("当前账号", tone, [
+          openClawCurrent
+            ? "OpenClaw · " + (openClawCurrent.displayLabel || openClawCurrent.profileId)
+            : "OpenClaw · 暂无当前账号",
+          codexCurrent
+            ? "Codex · " + (codexCurrent.displayLabel || codexCurrent.profileId)
+            : "Codex · 当前未关联到本地号池",
+        ]);
+      }
+
+      function createCodexRecommendationAlertCard(data) {
+        const row = getCodexRecommendedRow(data);
+        if (!row) {
+          if (!data?.codexRecommendedBlockedReason) {
+            return null;
+          }
+          return createAlertCard("Codex 推荐", "warn", [
+            data.codexRecommendedBlockedReason,
+            "当前不会自动切换 Codex",
+          ]);
+        }
+
+        const tone = data?.codexAutoSwitchSuggested
+          ? "warn"
+          : data?.codexWouldDivergeFromOpenClaw
+            ? "info"
+            : "ok";
+        const detail = data?.codexAutoSwitchReason
+          || (data?.codexWouldDivergeFromOpenClaw
+            ? "已与 OpenClaw 推荐拆开，给 Codex 预留独立账号。"
+            : "当前 Codex 推荐与 OpenClaw 一致。");
+        return createAlertCard("Codex 推荐", tone, [
+          (row.displayLabel || row.profileId) + " · " + row.profileId,
+          detail,
+        ]);
+      }
+
+      function createCodexRestartAlertCard() {
+        if (!needsCodexRestartBanner()) {
+          return null;
+        }
+        return createAlertCard("Codex 重启提示", "warn", [
+          appState.codexRestartMessage,
+          "如果 Codex 已在运行，请关闭后重新启动。",
+        ]);
       }
 
       function createLoginAlertCard(task) {
@@ -4496,9 +4631,21 @@ export function renderHtml() {
           cards.push(createLoginAlertCard(appState.loginTask));
         }
 
+        cards.push(createSelectionStatusAlertCard(data));
+
+        const codexRecommendationCard = createCodexRecommendationAlertCard(data);
+        if (codexRecommendationCard) {
+          cards.push(codexRecommendationCard);
+        }
+
         const tokenReminderCard = createTokenReminderAlertCard();
         if (tokenReminderCard) {
           cards.push(tokenReminderCard);
+        }
+
+        const codexRestartCard = createCodexRestartAlertCard();
+        if (codexRestartCard) {
+          cards.push(codexRestartCard);
         }
 
         if (data?.warnings?.length) {
@@ -4664,6 +4811,9 @@ export function renderHtml() {
           plan.textContent = row.plan;
           secondaryRow.appendChild(plan);
         }
+        if (row.openClawCurrent) {
+          secondaryRow.appendChild(createInfoPill("OpenClaw 当前", "info"));
+        }
         const codexPillLabel = row.canLinkCurrentCodex
           ? "可吸收当前 Codex"
           : row.codexCompatible
@@ -4673,6 +4823,9 @@ export function renderHtml() {
             : "Codex 需升级";
         const codexPillTone = row.canLinkCurrentCodex ? "warn" : row.codexCompatible ? "ok" : "info";
         secondaryRow.appendChild(createInfoPill(codexPillLabel, codexPillTone));
+        if (row.codexRecommended && !row.codexCurrent) {
+          secondaryRow.appendChild(createInfoPill("Codex 推荐", "warn"));
+        }
         if (row.expiresAt) {
           const expiry = document.createElement("span");
           expiry.className = "profile-inline-note strong";
@@ -4756,6 +4909,20 @@ export function renderHtml() {
           const others = appState.data.currentEffectiveOrder.filter((entry) => entry !== row.profileId);
           void applyCustomOrder([...others, row.profileId]);
         });
+
+        if (row.codexCompatible && !row.codexCurrent) {
+          const codexOnlyButton = document.createElement("button");
+          codexOnlyButton.type = "button";
+          codexOnlyButton.className = "profile-menu-button";
+          codexOnlyButton.textContent = "仅切 Codex";
+          codexOnlyButton.disabled = appState.busy;
+          codexOnlyButton.dataset.actionButton = "true";
+          codexOnlyButton.addEventListener("click", () => {
+            menu.removeAttribute("open");
+            void switchCodexOnly(row);
+          });
+          menuList.appendChild(codexOnlyButton);
+        }
 
         const renameButton = document.createElement("button");
         renameButton.type = "button";
@@ -4918,6 +5085,27 @@ export function renderHtml() {
         return data;
       }
 
+      function markCodexRestartRequired(message) {
+        appState.codexRestartRequired = true;
+        appState.codexRestartMessage = message;
+        if (appState.data) {
+          renderAlerts(appState.data);
+        }
+      }
+
+      async function maybeApplyIndependentCodexSwitch(data) {
+        if (!isIndependentCodexAutomationMode() || !data?.codexAutoSwitchSuggested || !data?.codexRecommendedProfileId) {
+          return { data, switched: false };
+        }
+
+        const nextState = await postJson("/api/switch-codex-profile", {
+          profileId: data.codexRecommendedProfileId,
+        });
+        render(nextState);
+        markCodexRestartRequired("Codex 凭据已按独立推荐更新，重启 Codex 后生效。");
+        return { data: nextState, switched: true };
+      }
+
       async function refreshTokenExpirySnapshot() {
         clearTokenReminderTimer();
         try {
@@ -4936,27 +5124,42 @@ export function renderHtml() {
         try {
           const data = await loadStateData();
           render(data);
+          let finalState = data;
+          let message = null;
+          let tone = "success";
+
           if (shouldAutoApplyRecommendedOrder(data)) {
             setFlash("正在自动应用推荐顺序...", "info");
             const nextState = await postJson("/api/apply-order", {
               order: data.recommendedOrder,
-              syncCodexSelection: true,
+              syncCodexSelection: isSharedCodexAutomationMode(),
             });
-            render(nextState);
+            finalState = nextState;
+            render(finalState);
             const fallbackMessage = okMessage === "额度自动刷新完成"
               ? "额度自动刷新后已应用推荐顺序"
               : "额度刷新后已应用推荐顺序";
-            setBusy(false, formatRefreshSuccessMessage(nextState, getApplyResultMessage(nextState.applyResult, fallbackMessage, {
+            if (isSharedCodexAutomationMode() && nextState.applyResult?.codexSelectionUpdated) {
+              markCodexRestartRequired("Codex 当前账号已同步到共享推荐，重启 Codex 后生效。");
+            }
+            message = getApplyResultMessage(nextState.applyResult, fallbackMessage, {
               updatedMessage: okMessage === "额度自动刷新完成"
-                ? "额度自动刷新后已应用推荐顺序，Codex 当前账号已同步"
-                : "额度刷新后已应用推荐顺序，Codex 当前账号已同步",
+                ? "额度自动刷新后已应用推荐顺序，Codex 当前账号已同步，重启 Codex 后生效"
+                : "额度刷新后已应用推荐顺序，Codex 当前账号已同步，重启 Codex 后生效",
               skippedPrefix: fallbackMessage,
-            })), "success");
+            });
           } else {
             const blockedReason = data?.recommendedSelectionBlockedReason;
-            const message = blockedReason ? okMessage + "，" + blockedReason : okMessage;
-            setBusy(false, formatRefreshSuccessMessage(data, message), blockedReason ? "warn" : "success");
+            message = blockedReason ? okMessage + "，" + blockedReason : okMessage;
+            tone = blockedReason ? "warn" : "success";
           }
+
+          const codexSwitch = await maybeApplyIndependentCodexSwitch(finalState);
+          finalState = codexSwitch.data;
+          if (codexSwitch.switched) {
+            message = (message || okMessage) + "，Codex 已切到独立推荐账号，重启 Codex 后生效";
+          }
+          setBusy(false, formatRefreshSuccessMessage(finalState, message || okMessage), tone);
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         } finally {
@@ -5037,15 +5240,25 @@ export function renderHtml() {
         }
         setBusy(true, "正在应用推荐顺序...", "info");
         try {
-          const data = await postJson("/api/apply-order", {
+          let data = await postJson("/api/apply-order", {
             order: appState.data.recommendedOrder,
-            syncCodexSelection: true,
+            syncCodexSelection: isSharedCodexAutomationMode(),
           });
+          const applyResult = data.applyResult;
           render(data);
-          setBusy(false, getApplyResultMessage(data.applyResult, "推荐顺序已应用", {
-            updatedMessage: "推荐顺序已应用，Codex 当前账号已同步",
+          if (isSharedCodexAutomationMode() && applyResult?.codexSelectionUpdated) {
+            markCodexRestartRequired("Codex 当前账号已同步到共享推荐，重启 Codex 后生效。");
+          }
+          const codexSwitch = await maybeApplyIndependentCodexSwitch(data);
+          data = codexSwitch.data;
+          let message = getApplyResultMessage(applyResult, "推荐顺序已应用", {
+            updatedMessage: "推荐顺序已应用，Codex 当前账号已同步，重启 Codex 后生效",
             skippedPrefix: "推荐顺序已应用",
-          }), "success");
+          });
+          if (codexSwitch.switched) {
+            message += "，Codex 已切到独立推荐账号，重启 Codex 后生效";
+          }
+          setBusy(false, message, "success");
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }
@@ -5186,7 +5399,20 @@ export function renderHtml() {
         try {
           const data = await postJson("/api/switch-profile", { profileId: row.profileId });
           render(data);
-          setBusy(false, "当前账号已切换", "success");
+          markCodexRestartRequired("OpenClaw 与 Codex 当前账号都已切换，重启 Codex 后生效。");
+          setBusy(false, "当前账号已切换，重启 Codex 后生效", "success");
+        } catch (error) {
+          setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        }
+      }
+
+      async function switchCodexOnly(row) {
+        setBusy(true, "正在切换 Codex 当前账号...", "info");
+        try {
+          const data = await postJson("/api/switch-codex-profile", { profileId: row.profileId });
+          render(data);
+          markCodexRestartRequired("Codex 当前账号已单独切换，重启 Codex 后生效。");
+          setBusy(false, "Codex 当前账号已切换，重启 Codex 后生效", "success");
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }
@@ -5490,6 +5716,23 @@ export function renderHtml() {
           appState.autoApplyRecommended ? "已开启额度刷新后自动应用推荐顺序" : "已关闭额度刷新后自动应用推荐顺序",
           "info",
         );
+      });
+
+      codexAutomationModeInputs.forEach((input) => {
+        input.addEventListener("change", () => {
+          if (!input.checked) {
+            return;
+          }
+          appState.codexAutomationMode = input.value;
+          persistAutomationSettings();
+          const label = input.value === "shared"
+            ? "Codex 已切换到共享模式"
+            : input.value === "independent-low-quota"
+              ? "Codex 已切换到独立避让模式"
+              : "Codex 已切换到仅手动模式";
+          renderAlerts(appState.data);
+          setFlash(label, "info");
+        });
       });
 
       usageProxyUrlInput.addEventListener("change", () => {

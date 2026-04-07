@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { CODEX_PROVIDER } from "./constants.js";
+import { CODEX_PROVIDER, PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT } from "./constants.js";
 import {
   applyOrderToAuthStore,
   buildLocalAuthStore,
@@ -186,6 +186,103 @@ function createEmptyUsage(error = null) {
   };
 }
 
+function getRemainingPercent(windowData) {
+  return typeof windowData?.remainingPercent === "number" && Number.isFinite(windowData.remainingPercent)
+    ? windowData.remainingPercent
+    : null;
+}
+
+function isCodexLowQuotaRow(row) {
+  if (!row || row.error) {
+    return false;
+  }
+
+  const primaryRemaining = getRemainingPercent(row.primary);
+  const secondaryRemaining = getRemainingPercent(row.secondary);
+  return (
+    (primaryRemaining != null && primaryRemaining <= PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT)
+    || secondaryRemaining === 0
+  );
+}
+
+function compareNullableNumberDesc(left, right) {
+  if (left == null && right == null) {
+    return 0;
+  }
+  if (left == null) {
+    return 1;
+  }
+  if (right == null) {
+    return -1;
+  }
+  return right - left;
+}
+
+function compareNullableNumberAsc(left, right) {
+  if (left == null && right == null) {
+    return 0;
+  }
+  if (left == null) {
+    return 1;
+  }
+  if (right == null) {
+    return -1;
+  }
+  return left - right;
+}
+
+function recommendCodexProfile(rows, options = {}) {
+  const openClawProfileId = typeof options.openClawProfileId === "string" && options.openClawProfileId.trim()
+    ? options.openClawProfileId.trim()
+    : null;
+  const compatibleRows = (Array.isArray(rows) ? rows : []).filter((row) => row?.codexCompatible);
+  const candidateRows = compatibleRows.filter((row) => row.profileId !== openClawProfileId);
+
+  if (compatibleRows.length === 0) {
+    return {
+      profileId: null,
+      blockedReason: "没有可供 Codex 使用的兼容账号。",
+    };
+  }
+
+  if (candidateRows.length === 0) {
+    return {
+      profileId: null,
+      blockedReason: "可供 Codex 使用的兼容账号只剩下 OpenClaw 当前第一名，已按规则避开。",
+    };
+  }
+
+  const best = candidateRows
+    .toSorted((left, right) => {
+      const primary = compareNullableNumberDesc(getRemainingPercent(left.primary), getRemainingPercent(right.primary));
+      if (primary !== 0) {
+        return primary;
+      }
+
+      const secondary = compareNullableNumberDesc(getRemainingPercent(left.secondary), getRemainingPercent(right.secondary));
+      if (secondary !== 0) {
+        return secondary;
+      }
+
+      const secondaryReset = compareNullableNumberAsc(left.secondary?.resetAt ?? null, right.secondary?.resetAt ?? null);
+      if (secondaryReset !== 0) {
+        return secondaryReset;
+      }
+
+      if (left.currentOrderIndex !== right.currentOrderIndex) {
+        return left.currentOrderIndex - right.currentOrderIndex;
+      }
+
+      return left.profileId.localeCompare(right.profileId);
+    })
+    .at(0);
+
+  return {
+    profileId: best?.profileId || null,
+    blockedReason: best ? null : "当前没有可供 Codex 切换的目标账号。",
+  };
+}
+
 function buildRecommendedSelection(rows, recommendedOrder) {
   const rowsById = new Map(rows.map((row) => [row.profileId, row]));
   for (const profileId of recommendedOrder) {
@@ -235,7 +332,7 @@ function createNotes() {
   return [
     "The project-local store is the canonical source of truth. OpenClaw auth-profiles.json is only updated for openai-codex profiles, order, lastGood, and usageStats. ~/.codex/auth.json is also generated from the local store.",
     "Quota refresh and token keepalive are separate flows: quota refresh reloads usage and ranking, while token keepalive only renews OAuth credentials.",
-    "Applying order only updates the local store and the managed openai-codex slice in OpenClaw runtime. It does not switch ~/.codex/auth.json.",
+    "Applying order updates the local store and the managed openai-codex slice in OpenClaw runtime. Codex auth is only rewritten when a flow explicitly requests it.",
     "Setting a profile as current writes both the OpenClaw runtime files and ~/.codex/auth.json, but only for Codex-compatible OAuth profiles.",
   ];
 }
@@ -259,9 +356,17 @@ function inspectCodexAuthFile(context, profiles, expectedCredential = null) {
     : [];
 
   let drift = false;
-  if (expectedCredential && isCodexCompatibleCredential(expectedCredential)) {
+  const matchedCredential = matchingProfileIds.length === 1
+    ? profiles.find((entry) => entry.profileId === matchingProfileIds[0])?.credential || null
+    : null;
+  const driftTarget = expectedCredential && isCodexCompatibleCredential(expectedCredential)
+    ? expectedCredential
+    : matchedCredential && isCodexCompatibleCredential(matchedCredential)
+      ? matchedCredential
+      : null;
+  if (driftTarget) {
     try {
-      const expected = buildCodexAuthFile(expectedCredential);
+      const expected = buildCodexAuthFile(driftTarget);
       drift = !raw || serializeComparable(raw) !== serializeComparable(expected);
     } catch {
       drift = true;
@@ -299,12 +404,12 @@ function inspectOpenClawRuntime(context, localStore = null) {
   };
 }
 
-function buildCodexSummary(context, codexRuntime, expectedProfileId = null) {
+function buildCodexSummary(context, codexRuntime, options = {}) {
   return {
     exists: context.codexAuthExists,
     path: context.codexAuthPath,
     linkedProfileId: codexRuntime.linkedProfileId,
-    expectedProfileId,
+    openClawSelectedProfileId: options.openClawSelectedProfileId || null,
     accountId: codexRuntime.auth?.tokens?.accountId || null,
     lastRefresh: codexRuntime.auth?.lastRefresh || null,
     error: codexRuntime.error,
@@ -695,9 +800,8 @@ export async function loadDashboardState(options = {}, deps = {}) {
 
   const finalProfiles = listCodexProfiles(authStore);
   const selectedProfileId = getSelectedProfileId(authStore, configOrder);
-  const selectedCredential = selectedProfileId ? authStore.profiles[selectedProfileId] : null;
   const runtimeAuth = inspectOpenClawRuntime(context, localStoreReady ? authStore : null);
-  const codexRuntime = inspectCodexAuthFile(context, finalProfiles, selectedCredential);
+  const codexRuntime = inspectCodexAuthFile(context, finalProfiles);
   const profileMap = new Map(finalProfiles.map((entry) => [entry.profileId, entry.credential]));
 
   const storedOrder = getStoredOrder(authStore);
@@ -721,12 +825,36 @@ export async function loadDashboardState(options = {}, deps = {}) {
         codexCompatible,
         codexStatusReason,
         canLinkCurrentCodex,
+        openClawCurrent: row.currentOrderIndex === 0,
         codexCurrent: codexRuntime.linkedProfileId === row.profileId,
         isSelectedEverywhere: codexRuntime.linkedProfileId === row.profileId && row.currentOrderIndex === 0,
       };
     })
     .toSorted((left, right) => left.recommendedOrderIndex - right.recommendedOrderIndex);
   const recommendedSelection = buildRecommendedSelection(rankedRows, recommendedOrder);
+  const codexRecommendation = recommendCodexProfile(rankedRows, {
+    openClawProfileId: recommendedSelection.profileId || selectedProfileId,
+  });
+  const codexCurrentRow = codexRuntime.linkedProfileId
+    ? rankedRows.find((row) => row.profileId === codexRuntime.linkedProfileId) || null
+    : null;
+  const codexCurrentLowQuota = isCodexLowQuotaRow(codexCurrentRow);
+  const codexAutoSwitchSuggested = Boolean(
+    codexCurrentLowQuota
+    && codexCurrentRow
+    && codexRecommendation.profileId
+    && codexRecommendation.profileId !== codexCurrentRow.profileId
+  );
+  const codexAutoSwitchReason = codexAutoSwitchSuggested
+    ? `当前 Codex 账号额度偏低，建议切到 ${codexRecommendation.profileId}。`
+    : codexCurrentLowQuota
+      ? codexRecommendation.blockedReason || "当前 Codex 账号额度偏低，但暂时没有可切换目标。"
+      : null;
+
+  const finalRankedRows = rankedRows.map((row) => ({
+    ...row,
+    codexRecommended: codexRecommendation.profileId === row.profileId,
+  }));
 
   const audit = buildConfigAudit({
     runtimeProfileIds,
@@ -735,7 +863,7 @@ export async function loadDashboardState(options = {}, deps = {}) {
     configOrder,
   });
   const warnings = buildDashboardWarnings(
-    buildWarnings({ rows: rankedRows, audit, context }),
+    buildWarnings({ rows: finalRankedRows, audit, context }),
     context,
     codexRuntime,
     runtimeAuth,
@@ -751,14 +879,26 @@ export async function loadDashboardState(options = {}, deps = {}) {
     },
     maintenance: buildMaintenanceSummary(authStore),
     runtimeAuth: buildOpenClawRuntimeSummary(context, runtimeAuth),
-    codexAuth: buildCodexSummary(context, codexRuntime, selectedProfileId),
+    codexAuth: buildCodexSummary(context, codexRuntime, {
+      openClawSelectedProfileId: selectedProfileId,
+    }),
     currentEffectiveOrder,
     storedOrder,
     configOrder,
     recommendedOrder,
     recommendedSelectionProfileId: recommendedSelection.profileId,
     recommendedSelectionBlockedReason: recommendedSelection.blockedReason,
-    rows: rankedRows,
+    codexRecommendedProfileId: codexRecommendation.profileId,
+    codexRecommendedBlockedReason: codexRecommendation.blockedReason,
+    codexCurrentLowQuota,
+    codexAutoSwitchSuggested,
+    codexAutoSwitchReason,
+    codexWouldDivergeFromOpenClaw: Boolean(
+      codexRecommendation.profileId
+      && selectedProfileId
+      && codexRecommendation.profileId !== selectedProfileId
+    ),
+    rows: finalRankedRows,
     warnings,
     notes: createNotes(),
     audit,
@@ -979,6 +1119,43 @@ export async function switchProfile(options, profileId, deps = {}) {
     preferredProfileId: profileId,
     codexCredential: exportCredential,
   });
+  return await loadDashboardState(options, deps);
+}
+
+export async function switchCodexProfile(options, profileId, deps = {}) {
+  const context = resolvePaths(options);
+  const store = readLocalAuthStore(context);
+  const credential = store.profiles[profileId];
+
+  if (!credential) {
+    throw new Error(`Profile "${profileId}" was not found in the local store.`);
+  }
+  if (!isCodexCompatibleCredential(credential)) {
+    throw new Error(`Profile "${profileId}" is not Codex-compatible yet: ${getCodexCompatibilityIssue(credential)}.`);
+  }
+
+  let exportCredential = credential;
+  let nextStore = store;
+  const resolved = deps.refreshImpl
+    ? await resolveCredentialToken(credential, {
+      proxyConfig: deps.proxyConfig,
+      refreshImpl: deps.refreshImpl,
+    })
+    : await resolveCredentialToken(credential, {
+      proxyConfig: deps.proxyConfig,
+    });
+
+  if (resolved.updated) {
+    exportCredential = resolved.credential;
+    nextStore = await updateAuthStore(options, (currentStore) => {
+      const next = structuredClone(currentStore);
+      next.profiles[profileId] = mergeRefreshedCredential(next.profiles[profileId], resolved.credential);
+      return next;
+    });
+    await writeRuntimeAuthProjection(options, nextStore);
+  }
+
+  await writeCodexSelection(options, exportCredential);
   return await loadDashboardState(options, deps);
 }
 
