@@ -29,6 +29,7 @@ import {
     switchProfile,
     waitForOpenAICallbackPort,
   } from "../src/state.js";
+import { buildQuotaBoardSummary } from "../src/quota-summary.js";
 import { renderHtml } from "../src/ui.js";
 import { createUsageFetch, resolveUsageProxyUrl } from "../src/usage-fetch.js";
 import { clearUsageRefreshCache } from "../src/usage-refresh.js";
@@ -2273,6 +2274,62 @@ test("parseArgs accepts local state dir override", () => {
   assert.equal(args.localStateDir, "/tmp/local-state");
 });
 
+test("buildQuotaBoardSummary aggregates total remaining quota across readable accounts", () => {
+  const summary = buildQuotaBoardSummary([
+    {
+      profileId: "openai-codex:alex",
+      displayLabel: "alex@example.com",
+      secondary: { remainingPercent: 6, resetAt: 1_710_000_000 },
+      primary: { remainingPercent: 49, resetAt: 1_710_000_500 },
+    },
+    {
+      profileId: "openai-codex:team",
+      displayLabel: "team@example.com",
+      secondary: { remainingPercent: 80, resetAt: 1_710_100_000 },
+      primary: { remainingPercent: 25, resetAt: 1_710_200_000 },
+    },
+  ]);
+
+  assert.equal(summary.totalAccounts, 2);
+  assert.equal(summary.secondary.totalCapacity, 200);
+  assert.equal(summary.secondary.totalRemaining, 86);
+  assert.equal(summary.secondary.readableCount, 2);
+  assert.equal(summary.primary.totalCapacity, 200);
+  assert.equal(summary.primary.totalRemaining, 74);
+  assert.equal(summary.primary.readableCount, 2);
+  assert.equal(Math.round(summary.secondary.segments[0].sharePercent), 3);
+  assert.equal(Math.round(summary.secondary.segments[1].sharePercent), 40);
+  assert.equal(Math.round(summary.primary.segments[0].sharePercent), 25);
+  assert.equal(Math.round(summary.primary.segments[1].sharePercent), 13);
+});
+
+test("buildQuotaBoardSummary excludes unreadable accounts from capacity", () => {
+  const summary = buildQuotaBoardSummary([
+    {
+      profileId: "openai-codex:ok",
+      displayLabel: "ok@example.com",
+      secondary: { remainingPercent: 40, resetAt: 1_710_000_000 },
+      primary: { remainingPercent: 10, resetAt: 1_710_000_500 },
+    },
+    {
+      profileId: "openai-codex:broken",
+      displayLabel: "broken@example.com",
+      secondary: { remainingPercent: null, resetAt: null },
+      primary: { remainingPercent: null, resetAt: null },
+    },
+  ]);
+
+  assert.equal(summary.totalAccounts, 2);
+  assert.equal(summary.secondary.totalCapacity, 100);
+  assert.equal(summary.secondary.totalRemaining, 40);
+  assert.equal(summary.secondary.readableCount, 1);
+  assert.equal(summary.primary.totalCapacity, 100);
+  assert.equal(summary.primary.totalRemaining, 10);
+  assert.equal(summary.primary.readableCount, 1);
+  assert.equal(summary.secondary.segments.length, 1);
+  assert.equal(summary.primary.segments.length, 1);
+});
+
 test("renderHtml exposes accounts view toggle and compact toolbar structure", () => {
   const html = renderHtml();
 
@@ -2285,6 +2342,10 @@ test("renderHtml exposes accounts view toggle and compact toolbar structure", ()
   assert.match(html, /更多工具/);
   assert.match(html, /id="toolbarHelpCard"/);
   assert.match(html, /id="refreshButton"[^>]*>刷新额度</);
+  assert.match(html, /id="quotaBoardTitle"/);
+  assert.match(html, /全局可用额度/);
+  assert.match(html, /id="quotaBoardSecondaryValue"/);
+  assert.match(html, /id="quotaBoardPrimaryValue"/);
   assert.match(html, /id="tabTokenRefresh"/);
   assert.match(html, /刷新 Token/);
   assert.match(html, /id="tokenRefreshButton"/);
@@ -2300,6 +2361,8 @@ test("renderHtml exposes accounts view toggle and compact toolbar structure", ()
   assert.match(html, /codex-auth-dashboard\.codex-automation-mode/);
   assert.doesNotMatch(html, /id="spotlightApplyButton"/);
   assert.doesNotMatch(html, /id="spotlightRefreshButton"/);
+  assert.doesNotMatch(html, /id="spotlightName"/);
+  assert.doesNotMatch(html, /id="spotlightQuotaRing"/);
 });
 
 test("loadTokenExpirySnapshot returns only OAuth profiles with finite expiry sorted by expiration", async () => {

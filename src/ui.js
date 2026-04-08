@@ -1,3 +1,5 @@
+import { buildQuotaBoardSummary } from "./quota-summary.js";
+
 function buildSvgDataUri(svg) {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
@@ -592,25 +594,8 @@ export function renderHtml() {
       }
 
       .spotlight-head {
-        display: flex;
-        gap: 16px;
-        justify-content: space-between;
-        align-items: start;
-      }
-
-      .spotlight-rank {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 42px;
-        min-height: 42px;
-        padding: 0 12px;
-        border-radius: 999px;
-        background: rgba(32, 22, 15, 0.92);
-        border: 1px solid rgba(255, 228, 201, 0.16);
-        color: #f6e8d9;
-        font-family: var(--mono);
-        font-size: 0.8rem;
+        display: grid;
+        gap: 10px;
       }
 
       .spotlight-name {
@@ -630,7 +615,7 @@ export function renderHtml() {
       }
 
       .spotlight-reason {
-        margin: 10px 0 0;
+        margin: 0;
         font-size: 0.88rem;
         line-height: 1.45;
         color: var(--muted);
@@ -649,60 +634,84 @@ export function renderHtml() {
 
       .spotlight-grid {
         display: grid;
-        gap: 20px;
-        grid-template-columns: minmax(0, 1fr) 128px;
-        align-items: center;
+        gap: 16px;
+        margin-top: 18px;
       }
 
-      .spotlight-visual {
+      .quota-board-window {
         display: grid;
         gap: 10px;
-        justify-items: center;
+        padding: 16px 18px;
+        border-radius: 20px;
+        border: 1px solid rgba(95, 68, 42, 0.12);
+        background: rgba(255, 255, 255, 0.48);
       }
 
-      .quota-ring {
-        --ring-progress: 0;
-        --ring-color: var(--accent);
-        width: 120px;
-        height: 120px;
-        border-radius: 50%;
-        background:
-          radial-gradient(circle at center, rgba(255, 255, 255, 0.98) 0 56%, transparent 57%),
-          conic-gradient(var(--ring-color) calc(var(--ring-progress) * 1%), rgba(29, 29, 31, 0.08) 0);
-        display: grid;
-        place-items: center;
+      .quota-board-window-head {
+        display: flex;
+        gap: 12px;
+        justify-content: space-between;
+        align-items: baseline;
       }
 
-      .quota-ring-core {
-        display: grid;
-        gap: 2px;
-        place-items: center;
-        text-align: center;
-      }
-
-      .quota-ring-value {
-        font-size: 1.55rem;
-        font-weight: 600;
-        line-height: 1;
-      }
-
-      .quota-ring-label {
-        font-size: 0.72rem;
+      .quota-board-window-label {
+        font-size: 0.82rem;
         letter-spacing: 0.08em;
         text-transform: uppercase;
         color: var(--muted);
       }
 
-      .spotlight-capsule {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 28px;
-        padding: 0 12px;
+      .quota-board-window-value {
+        font-size: clamp(1.15rem, 2vw, 1.5rem);
+        font-weight: 700;
+        color: #3e2819;
+      }
+
+      .quota-board-bar {
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        width: 100%;
+        min-height: 18px;
         border-radius: 999px;
         background: rgba(32, 22, 15, 0.08);
-        color: var(--text);
-        font-size: 0.78rem;
+        border: 1px solid rgba(95, 68, 42, 0.1);
+      }
+
+      .quota-board-bar[data-empty="true"] {
+        background:
+          repeating-linear-gradient(
+            135deg,
+            rgba(113, 92, 74, 0.12) 0,
+            rgba(113, 92, 74, 0.12) 8px,
+            rgba(255, 255, 255, 0.16) 8px,
+            rgba(255, 255, 255, 0.16) 16px
+          );
+      }
+
+      .quota-board-segment {
+        min-width: 0;
+        height: 100%;
+      }
+
+      .quota-board-segment.high {
+        background: linear-gradient(90deg, #2b7f60, #34a853);
+      }
+
+      .quota-board-segment.medium {
+        background: linear-gradient(90deg, #d48a24, #ffb347);
+      }
+
+      .quota-board-segment.low {
+        background: linear-gradient(90deg, #c95f40, #ff7b5a);
+      }
+
+      .quota-board-segment.unknown {
+        background: rgba(113, 92, 74, 0.18);
+      }
+
+      .quota-board-meta {
+        margin-top: 2px;
       }
 
       .meta-tag,
@@ -2286,25 +2295,29 @@ export function renderHtml() {
           <section class="spotlight-card">
             <div class="spotlight-head">
               <div>
-                <h2 id="spotlightName" class="spotlight-name">等待加载</h2>
-                <div id="spotlightProfileId" class="spotlight-id">-</div>
+                <div class="toolbar-help-eyebrow">Quota Overview</div>
+                <h2 id="quotaBoardTitle" class="spotlight-name">全局可用额度</h2>
+                <p id="quotaBoardDescription" class="spotlight-reason">按成功读取额度的账号汇总 7d 与 5h 总剩余额度。</p>
               </div>
-              <div id="spotlightRank" class="spotlight-rank">01</div>
+              <div id="quotaBoardTags" class="tag-row"></div>
             </div>
             <div class="spotlight-grid">
-              <div>
-                <p id="spotlightReason" class="spotlight-reason">正在读取</p>
-                <div id="spotlightTags" class="tag-row"></div>
-              </div>
-              <div class="spotlight-visual">
-                <div id="spotlightQuotaRing" class="quota-ring">
-                  <div class="quota-ring-core">
-                    <div id="spotlightQuotaValue" class="quota-ring-value">--%</div>
-                    <div class="quota-ring-label">7天</div>
-                  </div>
+              <section class="quota-board-window">
+                <div class="quota-board-window-head">
+                  <div class="quota-board-window-label">7d 总剩余</div>
+                  <div id="quotaBoardSecondaryValue" class="quota-board-window-value">--% / --%</div>
                 </div>
-                <div id="spotlightWindowCapsule" class="spotlight-capsule">重置未知</div>
-              </div>
+                <div id="quotaBoardSecondaryBar" class="quota-board-bar" role="progressbar" aria-label="7d total remaining quota" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+                <div id="quotaBoardSecondaryMeta" class="tag-row quota-board-meta"></div>
+              </section>
+              <section class="quota-board-window">
+                <div class="quota-board-window-head">
+                  <div class="quota-board-window-label">5h 总剩余</div>
+                  <div id="quotaBoardPrimaryValue" class="quota-board-window-value">--% / --%</div>
+                </div>
+                <div id="quotaBoardPrimaryBar" class="quota-board-bar" role="progressbar" aria-label="5h total remaining quota" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+                <div id="quotaBoardPrimaryMeta" class="tag-row quota-board-meta"></div>
+              </section>
             </div>
           </section>
 
@@ -2841,14 +2854,15 @@ export function renderHtml() {
       const autoApplyToggle = document.getElementById("autoApplyToggle");
       const codexAutomationModeInputs = Array.from(document.querySelectorAll('input[name="codexAutomationMode"]'));
       const usageProxyToggle = document.getElementById("usageProxyToggle");
-      const spotlightName = document.getElementById("spotlightName");
-      const spotlightProfileId = document.getElementById("spotlightProfileId");
-      const spotlightRank = document.getElementById("spotlightRank");
-      const spotlightReason = document.getElementById("spotlightReason");
-      const spotlightTags = document.getElementById("spotlightTags");
-      const spotlightQuotaRing = document.getElementById("spotlightQuotaRing");
-      const spotlightQuotaValue = document.getElementById("spotlightQuotaValue");
-      const spotlightWindowCapsule = document.getElementById("spotlightWindowCapsule");
+      const quotaBoardTitle = document.getElementById("quotaBoardTitle");
+      const quotaBoardDescription = document.getElementById("quotaBoardDescription");
+      const quotaBoardTags = document.getElementById("quotaBoardTags");
+      const quotaBoardSecondaryValue = document.getElementById("quotaBoardSecondaryValue");
+      const quotaBoardSecondaryBar = document.getElementById("quotaBoardSecondaryBar");
+      const quotaBoardSecondaryMeta = document.getElementById("quotaBoardSecondaryMeta");
+      const quotaBoardPrimaryValue = document.getElementById("quotaBoardPrimaryValue");
+      const quotaBoardPrimaryBar = document.getElementById("quotaBoardPrimaryBar");
+      const quotaBoardPrimaryMeta = document.getElementById("quotaBoardPrimaryMeta");
       const profilesCountValue = document.getElementById("profilesCountValue");
       const depletedProfilesValue = document.getElementById("depletedProfilesValue");
       const availableProfilesValue = document.getElementById("availableProfilesValue");
@@ -2900,6 +2914,8 @@ export function renderHtml() {
       const tokenReminderModalCloseButton = document.getElementById("tokenReminderModalCloseButton");
       const tokenReminderModalDismissButton = document.getElementById("tokenReminderModalDismissButton");
       const tokenReminderModalFocusButton = document.getElementById("tokenReminderModalFocusButton");
+
+      ${buildQuotaBoardSummary.toString()}
 
       const TOOLBAR_ACTIONS = {
         refresh: {
@@ -3230,6 +3246,12 @@ export function renderHtml() {
           : null;
       }
 
+      function formatQuotaBoardValue(windowSummary) {
+        return windowSummary.totalCapacity > 0
+          ? Math.round(windowSummary.totalRemaining) + "% / " + windowSummary.totalCapacity + "%"
+          : "--% / --%";
+      }
+
       function getQuotaTone(remaining) {
         if (remaining == null) {
           return "unknown";
@@ -3241,19 +3263,6 @@ export function renderHtml() {
           return "medium";
         }
         return "low";
-      }
-
-      function getQuotaColor(remaining) {
-        if (remaining == null) {
-          return "rgba(29, 29, 31, 0.16)";
-        }
-        if (remaining >= 60) {
-          return "#34a853";
-        }
-        if (remaining >= 30) {
-          return "#ff9f0a";
-        }
-        return "#ff453a";
       }
 
       function summarizeSecondaryWindow(rows) {
@@ -3269,6 +3278,34 @@ export function renderHtml() {
           }
         }
         return { depleted, available };
+      }
+
+      function renderQuotaBoardBar(container, windowSummary, title) {
+        container.innerHTML = "";
+        container.setAttribute("aria-valuemin", "0");
+        container.setAttribute("aria-valuemax", String(windowSummary.totalCapacity || 100));
+        container.setAttribute("aria-valuenow", String(Math.round(windowSummary.totalRemaining || 0)));
+
+        if (!windowSummary.totalCapacity || !windowSummary.segments.length) {
+          container.dataset.empty = "true";
+          const placeholder = document.createElement("div");
+          placeholder.className = "quota-board-segment unknown";
+          placeholder.style.width = "100%";
+          placeholder.title = title + " 暂无可读额度";
+          container.appendChild(placeholder);
+          return;
+        }
+
+        delete container.dataset.empty;
+        const fragment = document.createDocumentFragment();
+        windowSummary.segments.forEach((segment) => {
+          const node = document.createElement("div");
+          node.className = "quota-board-segment " + getQuotaTone(segment.remainingPercent);
+          node.style.width = String(segment.sharePercent) + "%";
+          node.title = segment.displayLabel + " · " + segment.remainingPercent + "%";
+          fragment.appendChild(node);
+        });
+        container.appendChild(fragment);
       }
 
       function createTag(label, tone = "") {
@@ -3298,13 +3335,6 @@ export function renderHtml() {
         if (tone === "medium") return "warn";
         if (tone === "low") return "danger";
         return "info";
-      }
-
-      function getRecommendedSelectionRow(data = appState.data) {
-        if (!data?.recommendedSelectionProfileId || !Array.isArray(data.rows)) {
-          return null;
-        }
-        return data.rows.find((row) => row.profileId === data.recommendedSelectionProfileId) || null;
       }
 
       function getOpenClawCurrentRow(data = appState.data) {
@@ -4143,62 +4173,6 @@ export function renderHtml() {
         return wrapper;
       }
 
-      function buildSpotlightSummary(row, data = appState.data) {
-        if (!row) {
-          return {
-            title: "暂无可自动应用账号",
-            detail: data?.recommendedSelectionBlockedReason || "等待账号数据",
-            tone: "warn",
-            tags: [data?.recommendedSelectionBlockedReason ? "自动应用已暂停" : "尚未读取"],
-          };
-        }
-
-        if (row.error) {
-          return {
-            title: "额度读取失败",
-            detail: "检查网络或重新登录",
-            tone: "danger",
-            tags: ["需要处理"],
-          };
-        }
-
-        if (row.recommendationEligible === false) {
-          return {
-            title: "暂不自动应用",
-            detail: row.recommendationBlockedReason || "当前账号不参与自动推荐",
-            tone: "warn",
-            tags: ["自动应用已跳过"],
-          };
-        }
-
-        const tags = [];
-        if (row.primary?.remainingPercent != null) {
-          tags.push("5h " + row.primary.remainingPercent + "%");
-        }
-        if (row.secondary?.remainingPercent != null) {
-          tags.push("7d " + row.secondary.remainingPercent + "%");
-        }
-        if (row.plan) {
-          tags.push("套餐 " + row.plan);
-        }
-        if (row.currentOrderIndex === 0) {
-          tags.push("已在首位");
-        } else if (row.currentOrderIndex < Number.MAX_SAFE_INTEGER) {
-          tags.push("当前 " + String(row.currentOrderIndex + 1));
-        } else {
-          tags.push("未进顺序");
-        }
-
-        return {
-          title: row.currentOrderIndex === 0 ? "现在就用它" : "下一位建议用它",
-          detail: row.secondary?.resetAt
-            ? "7天窗口 " + formatCountdown(row.secondary.resetAt).text.replace(/^倒计时 /, "")
-            : "7天窗口可用",
-          tone: row.currentOrderIndex === 0 ? "ok" : "info",
-          tags,
-        };
-      }
-
       function collectNextReset(data) {
         if (!data || !Array.isArray(data.rows)) {
           return null;
@@ -4666,23 +4640,61 @@ export function renderHtml() {
       }
 
       function renderSpotlight(data) {
-        const row = getRecommendedSelectionRow(data);
-        const summary = buildSpotlightSummary(row, data);
-        const remaining = getRemainingPercent(row?.secondary);
-        spotlightName.textContent = row ? row.displayLabel : "暂无可自动应用账号";
-        spotlightProfileId.textContent = row ? row.profileId : "-";
-        spotlightRank.textContent = row ? "01" : "--";
-        spotlightReason.textContent = summary.title + " · " + summary.detail;
-        spotlightTags.innerHTML = "";
-        summary.tags.forEach((item) => {
-          spotlightTags.appendChild(createTag(item, summary.tone));
+        const rows = Array.isArray(data?.rows) ? data.rows : [];
+        const summary = buildQuotaBoardSummary(rows);
+        const windows = [
+          {
+            title: "7d",
+            valueNode: quotaBoardSecondaryValue,
+            barNode: quotaBoardSecondaryBar,
+            metaNode: quotaBoardSecondaryMeta,
+            summary: summary.secondary,
+          },
+          {
+            title: "5h",
+            valueNode: quotaBoardPrimaryValue,
+            barNode: quotaBoardPrimaryBar,
+            metaNode: quotaBoardPrimaryMeta,
+            summary: summary.primary,
+          },
+        ];
+
+        quotaBoardTitle.textContent = "全局可用额度";
+        quotaBoardDescription.textContent = rows.length
+          ? "总盘子只统计成功读到额度的账号，分母按可读账号数 × 100% 计算。"
+          : "等待读取账号额度后汇总 7d 与 5h 总剩余额度。";
+
+        quotaBoardTags.innerHTML = "";
+        quotaBoardTags.appendChild(createTag("账号数 " + summary.totalAccounts, "info"));
+        quotaBoardTags.appendChild(createTag("7d 可读 " + summary.secondary.readableCount, summary.secondary.readableCount ? "ok" : "warn"));
+        quotaBoardTags.appendChild(createTag("5h 可读 " + summary.primary.readableCount, summary.primary.readableCount ? "ok" : "warn"));
+        const nextReset = collectNextReset(data);
+        quotaBoardTags.appendChild(
+          createTag(
+            nextReset ? "下次重置 " + formatCountdown(nextReset).text.replace(/^倒计时 /, "") : "下次重置 未知",
+            nextReset ? "info" : "warn",
+          ),
+        );
+
+        windows.forEach(({ title, valueNode, barNode, metaNode, summary: windowSummary }) => {
+          valueNode.textContent = formatQuotaBoardValue(windowSummary);
+          renderQuotaBoardBar(barNode, windowSummary, title);
+          metaNode.innerHTML = "";
+          metaNode.appendChild(
+            createInfoPill(
+              "可读 " + windowSummary.readableCount + "/" + summary.totalAccounts,
+              windowSummary.readableCount ? "info" : "warn",
+            ),
+          );
+          metaNode.appendChild(
+            createInfoPill(
+              windowSummary.nextResetAt
+                ? "下次重置 " + formatCountdown(windowSummary.nextResetAt).text.replace(/^倒计时 /, "")
+                : "重置未知",
+              windowSummary.nextResetAt ? "info" : "warn",
+            ),
+          );
         });
-        spotlightQuotaValue.textContent = remaining == null ? "--%" : remaining + "%";
-        spotlightQuotaRing.style.setProperty("--ring-progress", String(remaining == null ? 0 : remaining));
-        spotlightQuotaRing.style.setProperty("--ring-color", getQuotaColor(remaining));
-        spotlightWindowCapsule.textContent = row?.secondary?.resetAt
-          ? formatCountdown(row.secondary.resetAt).text.replace(/^倒计时 /, "")
-          : "重置未知";
       }
 
       function renderOverviewStats(data) {
