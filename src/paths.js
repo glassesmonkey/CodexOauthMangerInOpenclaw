@@ -70,6 +70,10 @@ export function resolvePaths(options = {}) {
     options.codexAuthPath ||
     process.env.CODEX_AUTH_PATH ||
     path.join(os.homedir(), ".codex", "auth.json");
+  const hermesAuthPath =
+    options.hermesAuthPath ||
+    process.env.HERMES_AUTH_PATH ||
+    path.join(os.homedir(), ".hermes", "auth.json");
   const localAuthStorePath = path.join(localStateDir, "auth-store.json");
   const runtimeAuthStorePath = path.join(agentDir, "auth-profiles.json");
   const sessionsDir = path.join(stateDir, "agents", agentId, "sessions");
@@ -87,11 +91,13 @@ export function resolvePaths(options = {}) {
     agentId,
     agentDir,
     codexAuthPath,
+    hermesAuthPath,
     authStorePath: localAuthStorePath,
     runtimeAuthStorePath,
     sessionsDir,
     sessionStorePath,
     codexAuthExists: pathExists(codexAuthPath),
+    hermesAuthExists: pathExists(hermesAuthPath),
     authStoreExists: pathExists(localAuthStorePath),
     runtimeAuthStoreExists: pathExists(runtimeAuthStorePath),
     sessionStoreExists: pathExists(sessionStorePath),

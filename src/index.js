@@ -107,6 +107,7 @@ export async function main() {
   console.log(`OpenClaw runtime auth: ${context.runtimeAuthStorePath}`);
   console.log(`Config: ${context.configPath}`);
   console.log(`Codex auth: ${context.codexAuthPath}`);
+  console.log(`Hermes auth: ${context.hermesAuthPath}`);
 
   if (args.open) {
     await openBrowser(url);

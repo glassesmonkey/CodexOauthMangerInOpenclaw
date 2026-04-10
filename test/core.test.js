@@ -10,6 +10,7 @@ import { bundleContainsPlaintext, readEncryptedExportBundle } from "../src/auth-
 import { buildCodexAuthFile, readCodexAuthFile } from "../src/codex-cli-auth.js";
 import { buildStoredCodexCredential, loginWithCodex, resolveCredentialToken } from "../src/codex-auth.js";
 import { deleteProfileFromConfig, syncCodexIntoConfig, touchOpenClawConfig } from "../src/config-store.js";
+import { buildHermesAuthFile } from "../src/hermes-auth.js";
 import { openBrowser, parseArgs } from "../src/index.js";
 import { buildConfigAudit, buildWarnings, recommendProfileOrder } from "../src/order.js";
 import { clearAutoAuthProfileOverrides, readSessionStore } from "../src/session-store.js";
@@ -672,7 +673,9 @@ test("applyOrder can sync Codex selection when applying a recommended order", as
   const localStateDir = path.join(stateDir, ".local");
   const agentDir = path.join(stateDir, "agents", "main", "agent");
   const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const hermesAuthPath = path.join(stateDir, ".hermes", "auth.json");
   fs.mkdirSync(agentDir, { recursive: true });
+  fs.mkdirSync(path.dirname(hermesAuthPath), { recursive: true });
 
   writeLocalStore(stateDir, {
     profiles: {
@@ -712,7 +715,7 @@ test("applyOrder can sync Codex selection when applying a recommended order", as
 
   try {
     const state = await applyOrder(
-      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      { stateDir, localStateDir, agent: "main", codexAuthPath, hermesAuthPath },
       ["openai-codex:work", "openai-codex:default"],
       {
         syncCodexSelection: true,
@@ -917,7 +920,9 @@ test("switchProfile writes projected ~/.codex/auth.json for Codex-compatible pro
   const localStateDir = path.join(stateDir, ".local");
   const agentDir = path.join(stateDir, "agents", "main", "agent");
   const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const hermesAuthPath = path.join(stateDir, ".hermes", "auth.json");
   fs.mkdirSync(agentDir, { recursive: true });
+  fs.mkdirSync(path.dirname(hermesAuthPath), { recursive: true });
 
   fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
     version: 2,
@@ -990,10 +995,38 @@ test("switchProfile writes projected ~/.codex/auth.json for Codex-compatible pro
       "openai-codex": ["openai-codex:default", "openai-codex:work"],
     },
   });
+  fs.writeFileSync(hermesAuthPath, JSON.stringify({
+    version: 1,
+    providers: {
+      "openai-codex": {
+        tokens: {
+          id_token: "old-id-token",
+          access_token: "old-access",
+          refresh_token: "old-refresh",
+          account_id: "old-account",
+        },
+        last_refresh: "2026-04-01T00:00:00.000Z",
+        auth_mode: "chatgpt",
+      },
+      other: {
+        value: true,
+      },
+    },
+    active_provider: "other",
+    updated_at: "2026-04-01T00:00:00.000Z",
+    credential_pool: {
+      "openai-codex": [
+        {
+          id: "preserve-me",
+          label: "device_code",
+        },
+      ],
+    },
+  }, null, 2));
 
   try {
     await switchProfile(
-      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      { stateDir, localStateDir, agent: "main", codexAuthPath, hermesAuthPath },
       "openai-codex:work",
       {
         fetchImpl: async () => ({
@@ -1019,6 +1052,26 @@ test("switchProfile writes projected ~/.codex/auth.json for Codex-compatible pro
     assert.equal(codexAuth.tokens.accessToken, "work-access");
     assert.equal(codexAuth.tokens.refreshToken, "work-refresh");
     assert.equal(codexAuth.tokens.accountId, "account-work");
+
+    const hermesAuth = JSON.parse(fs.readFileSync(hermesAuthPath, "utf8"));
+    assert.deepEqual(
+      hermesAuth.providers["openai-codex"],
+      buildHermesAuthFile({
+        type: "oauth",
+        provider: "openai-codex",
+        access: "work-access",
+        refresh: "work-refresh",
+        accountId: "account-work",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "work-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }).providers["openai-codex"],
+    );
+    assert.equal(hermesAuth.active_provider, "openai-codex");
+    assert.deepEqual(hermesAuth.credential_pool["openai-codex"], [{ id: "preserve-me", label: "device_code" }]);
+    assert.deepEqual(hermesAuth.providers.other, { value: true });
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -1029,7 +1082,9 @@ test("switchCodexProfile rewrites only Codex auth while leaving OpenClaw order u
   const localStateDir = path.join(stateDir, ".local");
   const agentDir = path.join(stateDir, "agents", "main", "agent");
   const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const hermesAuthPath = path.join(stateDir, ".hermes", "auth.json");
   fs.mkdirSync(agentDir, { recursive: true });
+  fs.mkdirSync(path.dirname(hermesAuthPath), { recursive: true });
 
   fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
     version: 2,
@@ -1088,10 +1143,22 @@ test("switchCodexProfile rewrites only Codex auth while leaving OpenClaw order u
       "openai-codex": ["openai-codex:default", "openai-codex:work"],
     },
   });
+  fs.writeFileSync(hermesAuthPath, JSON.stringify({
+    version: 1,
+    providers: {},
+    credential_pool: {
+      "openai-codex": [
+        {
+          id: "keep-pool",
+          priority: 0,
+        },
+      ],
+    },
+  }, null, 2));
 
   try {
     await switchCodexProfile(
-      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      { stateDir, localStateDir, agent: "main", codexAuthPath, hermesAuthPath },
       "openai-codex:work",
       {
         fetchImpl: async () => ({
@@ -1117,6 +1184,14 @@ test("switchCodexProfile rewrites only Codex auth while leaving OpenClaw order u
     assert.equal(codexAuth.tokens.accessToken, "work-access");
     assert.equal(codexAuth.tokens.refreshToken, "work-refresh");
     assert.equal(codexAuth.tokens.accountId, "account-work");
+
+    const hermesAuth = JSON.parse(fs.readFileSync(hermesAuthPath, "utf8"));
+    assert.equal(hermesAuth.providers["openai-codex"].tokens.id_token, "work-id-token");
+    assert.equal(hermesAuth.providers["openai-codex"].tokens.access_token, "work-access");
+    assert.equal(hermesAuth.providers["openai-codex"].tokens.refresh_token, "work-refresh");
+    assert.equal(hermesAuth.providers["openai-codex"].tokens.account_id, "account-work");
+    assert.equal(hermesAuth.active_provider, "openai-codex");
+    assert.deepEqual(hermesAuth.credential_pool["openai-codex"], [{ id: "keep-pool", priority: 0 }]);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -2043,7 +2118,9 @@ test("runTokenKeepalive refreshes OAuth profiles, updates maintenance, and rewri
   const localStateDir = path.join(stateDir, ".local");
   const agentDir = path.join(stateDir, "agents", "main", "agent");
   const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const hermesAuthPath = path.join(stateDir, ".hermes", "auth.json");
   fs.mkdirSync(agentDir, { recursive: true });
+  fs.mkdirSync(path.dirname(hermesAuthPath), { recursive: true });
 
   writeLocalStore(stateDir, {
     profiles: {
@@ -2083,7 +2160,7 @@ test("runTokenKeepalive refreshes OAuth profiles, updates maintenance, and rewri
 
   try {
     const result = await runTokenKeepalive(
-      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      { stateDir, localStateDir, agent: "main", codexAuthPath, hermesAuthPath },
       {
         refreshImpl: async (refreshToken) => ({
           access: `next-${refreshToken}`,
@@ -2131,7 +2208,9 @@ test("runTokenKeepalive preserves unrelated runtime entries while refreshing cod
   const localStateDir = path.join(stateDir, ".local");
   const agentDir = path.join(stateDir, "agents", "main", "agent");
   const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const hermesAuthPath = path.join(stateDir, ".hermes", "auth.json");
   fs.mkdirSync(agentDir, { recursive: true });
+  fs.mkdirSync(path.dirname(hermesAuthPath), { recursive: true });
 
   fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
     version: 2,
@@ -2186,7 +2265,7 @@ test("runTokenKeepalive preserves unrelated runtime entries while refreshing cod
 
   try {
     await runTokenKeepalive(
-      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      { stateDir, localStateDir, agent: "main", codexAuthPath, hermesAuthPath },
       {
         refreshImpl: async () => ({
           access: "next-access",
@@ -2521,6 +2600,8 @@ test("exportBundle and commitImportBundle round-trip encrypted local store", asy
   const sourceStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-export-src-"));
   const sourceLocalStateDir = path.join(sourceStateDir, ".local");
   const sourceCodexAuthPath = path.join(sourceStateDir, ".codex", "auth.json");
+  const sourceHermesAuthPath = path.join(sourceStateDir, ".hermes", "auth.json");
+  fs.mkdirSync(path.dirname(sourceHermesAuthPath), { recursive: true });
   writeLocalStore(sourceStateDir, {
     profiles: {
       "openai-codex:work": {
@@ -2557,7 +2638,13 @@ test("exportBundle and commitImportBundle round-trip encrypted local store", asy
 
   try {
     const exported = await exportBundle(
-      { stateDir: sourceStateDir, localStateDir: sourceLocalStateDir, agent: "main", codexAuthPath: sourceCodexAuthPath },
+      {
+        stateDir: sourceStateDir,
+        localStateDir: sourceLocalStateDir,
+        agent: "main",
+        codexAuthPath: sourceCodexAuthPath,
+        hermesAuthPath: sourceHermesAuthPath,
+      },
       { passphrase: "secret-passphrase" },
       { fetchImpl: usageFetch },
     );
@@ -2570,17 +2657,31 @@ test("exportBundle and commitImportBundle round-trip encrypted local store", asy
     const targetStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-export-dst-"));
     const targetLocalStateDir = path.join(targetStateDir, ".local");
     const targetCodexAuthPath = path.join(targetStateDir, ".codex", "auth.json");
+    const targetHermesAuthPath = path.join(targetStateDir, ".hermes", "auth.json");
+    fs.mkdirSync(path.dirname(targetHermesAuthPath), { recursive: true });
 
     try {
       const preview = await previewImportBundle(
-        { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+        {
+          stateDir: targetStateDir,
+          localStateDir: targetLocalStateDir,
+          agent: "main",
+          codexAuthPath: targetCodexAuthPath,
+          hermesAuthPath: targetHermesAuthPath,
+        },
         { bundle: exported.bundle, passphrase: "secret-passphrase" },
         { fetchImpl: usageFetch },
       );
       assert.equal(preview.preview.summary.add, 1);
 
       await commitImportBundle(
-        { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+        {
+          stateDir: targetStateDir,
+          localStateDir: targetLocalStateDir,
+          agent: "main",
+          codexAuthPath: targetCodexAuthPath,
+          hermesAuthPath: targetHermesAuthPath,
+        },
         { bundle: exported.bundle, passphrase: "secret-passphrase" },
         { fetchImpl: usageFetch },
       );
@@ -2606,6 +2707,8 @@ test("commitImportBundle keeps Codex profiles with same accountId but different 
   const sourceStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-import-src-"));
   const sourceLocalStateDir = path.join(sourceStateDir, ".local");
   const sourceCodexAuthPath = path.join(sourceStateDir, ".codex", "auth.json");
+  const sourceHermesAuthPath = path.join(sourceStateDir, ".hermes", "auth.json");
+  fs.mkdirSync(path.dirname(sourceHermesAuthPath), { recursive: true });
   writeLocalStore(sourceStateDir, {
     profiles: {
       "openai-codex:shared-a": {
@@ -2674,7 +2777,13 @@ test("commitImportBundle keeps Codex profiles with same accountId but different 
 
   try {
     const exported = await exportBundle(
-      { stateDir: sourceStateDir, localStateDir: sourceLocalStateDir, agent: "main", codexAuthPath: sourceCodexAuthPath },
+      {
+        stateDir: sourceStateDir,
+        localStateDir: sourceLocalStateDir,
+        agent: "main",
+        codexAuthPath: sourceCodexAuthPath,
+        hermesAuthPath: sourceHermesAuthPath,
+      },
       { passphrase: "secret-passphrase" },
       { fetchImpl: usageFetch },
     );
@@ -2682,6 +2791,8 @@ test("commitImportBundle keeps Codex profiles with same accountId but different 
     const targetStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-import-dst-"));
     const targetLocalStateDir = path.join(targetStateDir, ".local");
     const targetCodexAuthPath = path.join(targetStateDir, ".codex", "auth.json");
+    const targetHermesAuthPath = path.join(targetStateDir, ".hermes", "auth.json");
+    fs.mkdirSync(path.dirname(targetHermesAuthPath), { recursive: true });
     writeLocalStore(targetStateDir, {
       profiles: {
         "openai-codex:shared-a": {
@@ -2706,7 +2817,13 @@ test("commitImportBundle keeps Codex profiles with same accountId but different 
 
     try {
       const preview = await previewImportBundle(
-        { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+        {
+          stateDir: targetStateDir,
+          localStateDir: targetLocalStateDir,
+          agent: "main",
+          codexAuthPath: targetCodexAuthPath,
+          hermesAuthPath: targetHermesAuthPath,
+        },
         { bundle: exported.bundle, passphrase: "secret-passphrase" },
         { fetchImpl: usageFetch },
       );
@@ -2715,7 +2832,13 @@ test("commitImportBundle keeps Codex profiles with same accountId but different 
       assert.equal(preview.preview.summary.add, 2);
 
       await commitImportBundle(
-        { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+        {
+          stateDir: targetStateDir,
+          localStateDir: targetLocalStateDir,
+          agent: "main",
+          codexAuthPath: targetCodexAuthPath,
+          hermesAuthPath: targetHermesAuthPath,
+        },
         { bundle: exported.bundle, passphrase: "secret-passphrase" },
         { fetchImpl: usageFetch },
       );

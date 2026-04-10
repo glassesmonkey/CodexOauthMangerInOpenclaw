@@ -43,6 +43,7 @@ import {
   writeOpenClawConfig,
 } from "./config-store.js";
 import { withFileLock } from "./file-lock.js";
+import { writeHermesAuthFile } from "./hermes-auth.js";
 import { readJsonFile } from "./json-files.js";
 import {
   buildConfigAudit,
@@ -330,10 +331,10 @@ function resolveUsageToken(credential) {
 
 function createNotes() {
   return [
-    "The project-local store is the canonical source of truth. OpenClaw auth-profiles.json is only updated for openai-codex profiles, order, lastGood, and usageStats. ~/.codex/auth.json is also generated from the local store.",
+    "The project-local store is the canonical source of truth. OpenClaw auth-profiles.json is only updated for openai-codex profiles, order, lastGood, and usageStats. ~/.codex/auth.json and ~/.hermes/auth.json are also generated from the local store.",
     "Quota refresh and token keepalive are separate flows: quota refresh reloads usage and ranking, while token keepalive only renews OAuth credentials.",
     "Applying order updates the local store and the managed openai-codex slice in OpenClaw runtime. Codex auth is only rewritten when a flow explicitly requests it.",
-    "Setting a profile as current writes both the OpenClaw runtime files and ~/.codex/auth.json, but only for Codex-compatible OAuth profiles.",
+    "Setting a profile as current writes the OpenClaw runtime files plus ~/.codex/auth.json and ~/.hermes/auth.json, but only for Codex-compatible OAuth profiles.",
   ];
 }
 
@@ -507,6 +508,10 @@ async function writeCodexSelection(options, credential) {
   fs.mkdirSync(path.dirname(context.codexAuthPath), { recursive: true });
   await withFileLock(context.codexAuthPath, async () => {
     writeCodexAuthFile(context.codexAuthPath, credential);
+  });
+  fs.mkdirSync(path.dirname(context.hermesAuthPath), { recursive: true });
+  await withFileLock(context.hermesAuthPath, async () => {
+    writeHermesAuthFile(context.hermesAuthPath, credential);
   });
 }
 
