@@ -1,5 +1,6 @@
 import http from "node:http";
 import {
+  absorbHermesRuntime,
   LoginManager,
   absorbOpenClawRuntime,
   applyOrder,
@@ -126,6 +127,12 @@ export async function startDashboardServer(options = {}) {
       if (request.method === "POST" && url.pathname === "/api/absorb-openclaw-runtime") {
         const body = await readBody(request);
         sendJson(response, 200, await absorbOpenClawRuntime(options, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/absorb-hermes-runtime") {
+        const body = await readBody(request);
+        sendJson(response, 200, await absorbHermesRuntime(options, createStateDeps(url, body)));
         return;
       }
 

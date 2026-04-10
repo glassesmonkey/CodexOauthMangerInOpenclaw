@@ -46,6 +46,11 @@ export function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--hermes-home" && next) {
+      args.hermesHome = next.trim();
+      index += 1;
+      continue;
+    }
     if (arg === "--port" && next) {
       args.port = Number(next) || 3001;
       index += 1;
@@ -107,6 +112,8 @@ export async function main() {
   console.log(`OpenClaw runtime auth: ${context.runtimeAuthStorePath}`);
   console.log(`Config: ${context.configPath}`);
   console.log(`Codex auth: ${context.codexAuthPath}`);
+  console.log(`Hermes home: ${context.hermesHome}`);
+  console.log(`Hermes auth: ${context.hermesAuthPath}`);
 
   if (args.open) {
     await openBrowser(url);

@@ -10,6 +10,7 @@ import { bundleContainsPlaintext, readEncryptedExportBundle } from "../src/auth-
 import { buildCodexAuthFile, readCodexAuthFile } from "../src/codex-cli-auth.js";
 import { buildStoredCodexCredential, loginWithCodex, resolveCredentialToken } from "../src/codex-auth.js";
 import { deleteProfileFromConfig, syncCodexIntoConfig, touchOpenClawConfig } from "../src/config-store.js";
+import { extractHermesManagedPoolProfileIds, readHermesAuthFile } from "../src/hermes-auth.js";
 import { openBrowser, parseArgs } from "../src/index.js";
 import { buildConfigAudit, buildWarnings, recommendProfileOrder } from "../src/order.js";
 import { clearAutoAuthProfileOverrides, readSessionStore } from "../src/session-store.js";
@@ -23,9 +24,10 @@ import {
   loadDashboardState,
   loadTokenExpirySnapshot,
   LoginManager,
-    previewImportBundle,
-    runTokenKeepalive,
-    switchCodexProfile,
+  previewImportBundle,
+  rebuildRuntime,
+  runTokenKeepalive,
+  switchCodexProfile,
     switchProfile,
     waitForOpenAICallbackPort,
   } from "../src/state.js";
@@ -91,8 +93,26 @@ function createOauthProfile({
   };
 }
 
+const originalHermesHome = process.env.HERMES_HOME;
+let activeTestHermesHome = null;
+
 test.beforeEach(() => {
   clearUsageRefreshCache();
+  activeTestHermesHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-hermes-home-"));
+  process.env.HERMES_HOME = activeTestHermesHome;
+});
+
+test.afterEach(() => {
+  if (typeof originalHermesHome === "string") {
+    process.env.HERMES_HOME = originalHermesHome;
+  } else {
+    delete process.env.HERMES_HOME;
+  }
+
+  if (activeTestHermesHome) {
+    fs.rmSync(activeTestHermesHome, { recursive: true, force: true });
+    activeTestHermesHome = null;
+  }
 });
 
 test("recommendProfileOrder prefers earlier secondary reset time", () => {
@@ -742,6 +762,14 @@ test("applyOrder can sync Codex selection when applying a recommended order", as
     assert.equal(codexAuth.tokens.idToken, "work-id-token");
     assert.equal(codexAuth.tokens.accessToken, "work-access");
     assert.equal(codexAuth.tokens.refreshToken, "work-refresh");
+
+    const hermesAuth = readHermesAuthFile(path.join(activeTestHermesHome, "auth.json"));
+    assert.equal(hermesAuth.active_provider, "openai-codex");
+    assert.equal(hermesAuth.providers["openai-codex"].tokens.access_token, "work-access");
+    assert.deepEqual(extractHermesManagedPoolProfileIds(hermesAuth), [
+      "openai-codex:work",
+      "openai-codex:default",
+    ]);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -829,6 +857,13 @@ test("applyOrder skips Codex sync when the recommended top profile is not Codex-
     const codexAuth = readCodexAuthFile(codexAuthPath);
     assert.equal(codexAuth.tokens.idToken, "default-id-token");
     assert.equal(codexAuth.tokens.accessToken, "default-access");
+
+    const hermesAuth = readHermesAuthFile(path.join(activeTestHermesHome, "auth.json"));
+    assert.equal(hermesAuth.providers["openai-codex"].tokens.access_token, "work-access");
+    assert.deepEqual(extractHermesManagedPoolProfileIds(hermesAuth), [
+      "openai-codex:work",
+      "openai-codex:default",
+    ]);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -1019,6 +1054,14 @@ test("switchProfile writes projected ~/.codex/auth.json for Codex-compatible pro
     assert.equal(codexAuth.tokens.accessToken, "work-access");
     assert.equal(codexAuth.tokens.refreshToken, "work-refresh");
     assert.equal(codexAuth.tokens.accountId, "account-work");
+
+    const hermesAuth = readHermesAuthFile(path.join(activeTestHermesHome, "auth.json"));
+    assert.equal(hermesAuth.active_provider, "openai-codex");
+    assert.equal(hermesAuth.providers["openai-codex"].tokens.access_token, "work-access");
+    assert.deepEqual(extractHermesManagedPoolProfileIds(hermesAuth), [
+      "openai-codex:work",
+      "openai-codex:default",
+    ]);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -1029,6 +1072,7 @@ test("switchCodexProfile rewrites only Codex auth while leaving OpenClaw order u
   const localStateDir = path.join(stateDir, ".local");
   const agentDir = path.join(stateDir, "agents", "main", "agent");
   const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const hermesAuthPath = path.join(activeTestHermesHome, "auth.json");
   fs.mkdirSync(agentDir, { recursive: true });
 
   fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
@@ -1088,6 +1132,37 @@ test("switchCodexProfile rewrites only Codex auth while leaving OpenClaw order u
       "openai-codex": ["openai-codex:default", "openai-codex:work"],
     },
   });
+  fs.mkdirSync(path.dirname(hermesAuthPath), { recursive: true });
+  fs.writeFileSync(hermesAuthPath, JSON.stringify({
+    version: 1,
+    active_provider: "openai-codex",
+    providers: {
+      "openai-codex": {
+        tokens: {
+          access_token: "default-access",
+          refresh_token: "default-refresh",
+        },
+        last_refresh: "2026-04-02T18:02:46.501Z",
+        auth_mode: "chatgpt",
+      },
+    },
+    credential_pool: {
+      "openai-codex": [
+        {
+          id: "managed-default",
+          label: "default@example.com",
+          auth_type: "oauth",
+          priority: 0,
+          source: "manual:dashboard:openai-codex:default",
+          access_token: "default-access",
+          refresh_token: "default-refresh",
+          last_refresh: "2026-04-02T18:02:46.501Z",
+          base_url: "https://chatgpt.com/backend-api/codex",
+        },
+      ],
+    },
+  }, null, 2));
+  const hermesBefore = fs.readFileSync(hermesAuthPath, "utf8");
 
   try {
     await switchCodexProfile(
@@ -1110,6 +1185,7 @@ test("switchCodexProfile rewrites only Codex auth while leaving OpenClaw order u
 
     const runtimeStore = readAuthStore(path.join(agentDir, "auth-profiles.json"));
     assert.deepEqual(runtimeStore.order["openai-codex"], ["openai-codex:default", "openai-codex:work"]);
+    assert.equal(fs.readFileSync(hermesAuthPath, "utf8"), hermesBefore);
 
     const codexAuth = readCodexAuthFile(codexAuthPath);
     assert.ok(codexAuth);
@@ -1117,6 +1193,148 @@ test("switchCodexProfile rewrites only Codex auth while leaving OpenClaw order u
     assert.equal(codexAuth.tokens.accessToken, "work-access");
     assert.equal(codexAuth.tokens.refreshToken, "work-refresh");
     assert.equal(codexAuth.tokens.accountId, "account-work");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("rebuildRuntime rewrites Hermes managed pool first while preserving unmanaged entries", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-hermes-rebuild-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const hermesAuthPath = path.join(activeTestHermesHome, "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+  fs.mkdirSync(path.dirname(hermesAuthPath), { recursive: true });
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": createOauthProfile({
+        access: "default-access",
+        refresh: "default-refresh",
+        accountId: "account-default",
+        email: "default@example.com",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "default-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:work": createOauthProfile({
+        access: "work-access",
+        refresh: "work-refresh",
+        accountId: "account-work",
+        email: "work@example.com",
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:work", "openai-codex:default"],
+    },
+  });
+
+  fs.writeFileSync(hermesAuthPath, JSON.stringify({
+    version: 1,
+    active_provider: "openai-codex",
+    providers: {
+      "openai-codex": {
+        tokens: {
+          access_token: "stale-access",
+          refresh_token: "stale-refresh",
+        },
+        last_refresh: "2026-04-01T00:00:00.000Z",
+        auth_mode: "chatgpt",
+      },
+      anthropic: {
+        api_key: "manual-anthropic",
+      },
+    },
+    credential_pool: {
+      "openai-codex": [
+        {
+          id: "old-managed",
+          label: "old-managed",
+          auth_type: "oauth",
+          priority: 0,
+          source: "manual:dashboard:openai-codex:legacy",
+          access_token: "legacy-access",
+          refresh_token: "legacy-refresh",
+          last_refresh: "2026-04-01T00:00:00.000Z",
+          base_url: "https://chatgpt.com/backend-api/codex",
+        },
+        {
+          id: "seeded-device",
+          label: "device_code",
+          auth_type: "oauth",
+          priority: 1,
+          source: "device_code",
+          access_token: "seeded-access",
+          refresh_token: "seeded-refresh",
+          last_refresh: "2026-04-01T00:00:00.000Z",
+          base_url: "https://chatgpt.com/backend-api/codex",
+        },
+        {
+          id: "manual-device",
+          label: "device_code",
+          auth_type: "oauth",
+          priority: 2,
+          source: "manual:device_code",
+          access_token: "manual-access",
+          refresh_token: "manual-refresh",
+          last_refresh: "2026-04-01T00:00:00.000Z",
+          base_url: "https://chatgpt.com/backend-api/codex",
+        },
+        {
+          id: "env-entry",
+          label: "env-entry",
+          auth_type: "oauth",
+          priority: 3,
+          source: "env:OPENAI_API_KEY",
+          access_token: "env-access",
+          base_url: "https://example.com",
+        },
+      ],
+      anthropic: [
+        {
+          id: "anthropic-entry",
+          label: "anthropic-entry",
+          auth_type: "api_key",
+          priority: 0,
+          source: "env:ANTHROPIC_API_KEY",
+          access_token: "anthropic-key",
+        },
+      ],
+    },
+  }, null, 2));
+
+  try {
+    await rebuildRuntime(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    const hermesAuth = readHermesAuthFile(hermesAuthPath);
+    const codexPool = hermesAuth.credential_pool["openai-codex"];
+    assert.deepEqual(codexPool.map((entry) => entry.source), [
+      "manual:dashboard:openai-codex:work",
+      "manual:dashboard:openai-codex:default",
+      "manual:device_code",
+      "env:OPENAI_API_KEY",
+    ]);
+    assert.deepEqual(codexPool.map((entry) => entry.priority), [0, 1, 2, 3]);
+    assert.equal(hermesAuth.providers["openai-codex"].tokens.access_token, "work-access");
+    assert.equal(hermesAuth.credential_pool.anthropic[0].access_token, "anthropic-key");
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -2121,6 +2339,13 @@ test("runTokenKeepalive refreshes OAuth profiles, updates maintenance, and rewri
     const codexAuth = readCodexAuthFile(codexAuthPath);
     assert.equal(codexAuth.tokens.accessToken, "next-default-refresh");
     assert.equal(codexAuth.tokens.refreshToken, "next-default-refresh");
+
+    const hermesAuth = readHermesAuthFile(path.join(activeTestHermesHome, "auth.json"));
+    assert.equal(hermesAuth.providers["openai-codex"].tokens.access_token, "next-default-refresh");
+    assert.deepEqual(extractHermesManagedPoolProfileIds(hermesAuth), [
+      "openai-codex:default",
+      "openai-codex:work",
+    ]);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -2266,6 +2491,12 @@ test("parseArgs accepts codex auth override", () => {
   const args = parseArgs(["node", "src/index.js", "--codex-auth", "/tmp/codex-auth.json"]);
 
   assert.equal(args.codexAuthPath, "/tmp/codex-auth.json");
+});
+
+test("parseArgs accepts hermes home override", () => {
+  const args = parseArgs(["node", "src/index.js", "--hermes-home", "/tmp/hermes-home"]);
+
+  assert.equal(args.hermesHome, "/tmp/hermes-home");
 });
 
 test("parseArgs accepts local state dir override", () => {
@@ -2512,6 +2743,86 @@ test("bootstrapLocalStore imports runtime auth store and matching Codex sidecar"
       idToken: "bootstrap-id",
       lastRefresh: "2026-04-02T18:02:46.501Z",
     });
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("bootstrapLocalStore can initialize from Hermes managed pool without OpenClaw runtime", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-bootstrap-hermes-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const hermesAuthPath = path.join(activeTestHermesHome, "auth.json");
+  fs.mkdirSync(path.dirname(hermesAuthPath), { recursive: true });
+
+  fs.writeFileSync(hermesAuthPath, JSON.stringify({
+    version: 1,
+    active_provider: "openai-codex",
+    providers: {
+      "openai-codex": {
+        tokens: {
+          access_token: createJwt({
+            exp: Math.floor((Date.now() + 60_000) / 1000),
+            "https://api.openai.com/auth": {
+              chatgpt_account_id: "bootstrap-hermes-account",
+            },
+            "https://api.openai.com/profile": {
+              email: "bootstrap-hermes@example.com",
+            },
+          }),
+          refresh_token: "bootstrap-hermes-refresh",
+        },
+        last_refresh: "2026-04-10T12:00:00.000Z",
+        auth_mode: "chatgpt",
+      },
+    },
+    credential_pool: {
+      "openai-codex": [
+        {
+          id: "managed-work",
+          label: "bootstrap-hermes@example.com",
+          auth_type: "oauth",
+          priority: 0,
+          source: "manual:dashboard:openai-codex:work",
+          access_token: createJwt({
+            exp: Math.floor((Date.now() + 60_000) / 1000),
+            "https://api.openai.com/auth": {
+              chatgpt_account_id: "bootstrap-hermes-account",
+            },
+            "https://api.openai.com/profile": {
+              email: "bootstrap-hermes@example.com",
+            },
+          }),
+          refresh_token: "bootstrap-hermes-refresh",
+          last_refresh: "2026-04-10T12:00:00.000Z",
+          base_url: "https://chatgpt.com/backend-api/codex",
+        },
+      ],
+    },
+  }, null, 2));
+
+  try {
+    await bootstrapLocalStore(
+      { stateDir, localStateDir, agent: "main" },
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 10, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 20, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    const store = readAuthStore(path.join(localStateDir, "auth-store.json"));
+    assert.deepEqual(store.order["openai-codex"], ["openai-codex:work"]);
+    assert.equal(store.profiles["openai-codex:work"].refresh, "bootstrap-hermes-refresh");
+    assert.equal(store.profiles["openai-codex:work"].accountId, "bootstrap-hermes-account");
+    assert.equal(store.profiles["openai-codex:work"].email, "bootstrap-hermes@example.com");
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
