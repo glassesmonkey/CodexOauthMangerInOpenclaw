@@ -43,6 +43,17 @@ import {
   writeOpenClawConfig,
 } from "./config-store.js";
 import { withFileLock } from "./file-lock.js";
+import {
+  buildHermesAuthFile,
+  extractHermesManagedProfiles,
+  extractHermesManagedProjection,
+  extractHermesProviderCredential,
+  getHermesCompatibilityIssue,
+  isHermesCompatibleCredential,
+  readHermesAuthFile,
+  readHermesAuthRaw,
+  writeHermesAuthFile,
+} from "./hermes-auth.js";
 import { readJsonFile } from "./json-files.js";
 import {
   buildConfigAudit,
@@ -84,6 +95,68 @@ function resolveExpiresAt(credential) {
 
 function normalizeEmail(email) {
   return typeof email === "string" && email.trim() ? email.trim().toLowerCase() : null;
+}
+
+function sanitizeProfileSuffix(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function createBootstrapProfileId(existingIds, credential, preferredLabel = "default") {
+  const candidates = [
+    sanitizeProfileSuffix(resolveEmail(credential)?.split("@")[0] || ""),
+    sanitizeProfileSuffix(resolveAccountId(credential) || ""),
+    sanitizeProfileSuffix(preferredLabel),
+    "default",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const profileId = `${CODEX_PROVIDER}:${candidate}`;
+    if (!existingIds.has(profileId)) {
+      return profileId;
+    }
+  }
+
+  let index = 2;
+  while (existingIds.has(`${CODEX_PROVIDER}:default-${index}`)) {
+    index += 1;
+  }
+  return `${CODEX_PROVIDER}:default-${index}`;
+}
+
+function exactTokenMatch(left, right) {
+  const leftRefresh = typeof left?.refresh === "string" ? left.refresh.trim() : "";
+  const rightRefresh = typeof right?.refresh === "string" ? right.refresh.trim() : "";
+  if (leftRefresh && rightRefresh && leftRefresh === rightRefresh) {
+    return true;
+  }
+
+  const leftAccess = typeof left?.access === "string" ? left.access.trim() : "";
+  const rightAccess = typeof right?.access === "string" ? right.access.trim() : "";
+  return Boolean(leftAccess) && Boolean(rightAccess) && leftAccess === rightAccess;
+}
+
+function credentialsShareIdentity(left, right) {
+  if (exactTokenMatch(left, right)) {
+    return true;
+  }
+
+  const leftAccountId = resolveAccountId(left);
+  const rightAccountId = resolveAccountId(right);
+  if (leftAccountId && rightAccountId) {
+    return leftAccountId === rightAccountId;
+  }
+
+  const leftEmail = normalizeEmail(resolveEmail(left));
+  const rightEmail = normalizeEmail(resolveEmail(right));
+  if (leftEmail && rightEmail) {
+    return leftEmail === rightEmail;
+  }
+
+  return false;
 }
 
 function serializeComparable(value) {
@@ -330,10 +403,10 @@ function resolveUsageToken(credential) {
 
 function createNotes() {
   return [
-    "The project-local store is the canonical source of truth. OpenClaw auth-profiles.json is only updated for openai-codex profiles, order, lastGood, and usageStats. ~/.codex/auth.json is also generated from the local store.",
+    "The project-local store is the canonical source of truth. OpenClaw auth-profiles.json, Hermes auth.json, and ~/.codex/auth.json are all generated projections.",
     "Quota refresh and token keepalive are separate flows: quota refresh reloads usage and ranking, while token keepalive only renews OAuth credentials.",
-    "Applying order updates the local store and the managed openai-codex slice in OpenClaw runtime. Codex auth is only rewritten when a flow explicitly requests it.",
-    "Setting a profile as current writes both the OpenClaw runtime files and ~/.codex/auth.json, but only for Codex-compatible OAuth profiles.",
+    "Applying order updates the local store, the managed OpenClaw slice, and the managed Hermes slice. ~/.codex/auth.json is only rewritten when the selected account is Codex-compatible.",
+    "Setting a profile as current updates OpenClaw first, then Hermes if the account is OAuth-compatible, and finally Codex CLI if the account also carries a Codex id_token.",
   ];
 }
 
@@ -404,6 +477,55 @@ function inspectOpenClawRuntime(context, localStore = null) {
   };
 }
 
+function inspectHermesAuthFile(context, localStore = null, options = {}) {
+  let auth = null;
+  let raw = null;
+  let error = null;
+
+  try {
+    raw = readHermesAuthRaw(context.hermesAuthPath);
+    auth = readHermesAuthFile(context.hermesAuthPath);
+  } catch (readError) {
+    error = toErrorMessage(readError);
+  }
+
+  const projection = extractHermesManagedProjection(raw);
+  const managedProfiles = extractHermesManagedProfiles(raw);
+  const providerCredential = extractHermesProviderCredential(raw);
+  const matchingProfileIds = providerCredential
+    ? listCodexProfiles(localStore || buildLocalAuthStore({}))
+      .filter((entry) => credentialsShareIdentity(entry.credential, providerCredential))
+      .map((entry) => entry.profileId)
+    : [];
+
+  let drift = false;
+  if (localStore) {
+    try {
+      const expected = buildHermesAuthFile(localStore, raw || {}, {
+        preferredOrder: options.preferredOrder,
+        selectedProfileId: options.selectedProfileId,
+      });
+      drift = serializeComparable(extractHermesManagedProjection(raw)) !== serializeComparable(extractHermesManagedProjection(expected));
+    } catch {
+      drift = true;
+    }
+  }
+
+  return {
+    auth,
+    raw,
+    error,
+    drift,
+    activeProvider: projection.activeProvider,
+    providerCredential,
+    matchingProfileIds,
+    linkedProfileId: matchingProfileIds.length === 1 ? matchingProfileIds[0] : null,
+    ambiguous: matchingProfileIds.length > 1,
+    selectedProfileId: matchingProfileIds.length === 1 ? matchingProfileIds[0] : null,
+    poolProfileIds: managedProfiles.map((entry) => entry.profileId),
+  };
+}
+
 function buildCodexSummary(context, codexRuntime, options = {}) {
   return {
     exists: context.codexAuthExists,
@@ -427,7 +549,19 @@ function buildOpenClawRuntimeSummary(context, runtimeAuth) {
   };
 }
 
-function buildDashboardWarnings(baseWarnings, context, codexRuntime, runtimeAuth, localStoreReady) {
+function buildHermesSummary(context, hermesRuntime) {
+  return {
+    exists: context.hermesAuthExists,
+    path: context.hermesAuthPath,
+    error: hermesRuntime.error,
+    drift: hermesRuntime.drift,
+    activeProvider: hermesRuntime.activeProvider,
+    selectedProfileId: hermesRuntime.selectedProfileId,
+    poolProfileIds: hermesRuntime.poolProfileIds,
+  };
+}
+
+function buildDashboardWarnings(baseWarnings, context, codexRuntime, runtimeAuth, hermesRuntime, localStoreReady) {
   const warnings = [...baseWarnings];
 
   if (!localStoreReady) {
@@ -448,6 +582,16 @@ function buildDashboardWarnings(baseWarnings, context, codexRuntime, runtimeAuth
     warnings.push("Current ~/.codex/auth.json matches multiple stored profiles.");
   } else if (localStoreReady && codexRuntime.drift) {
     warnings.push("Current ~/.codex/auth.json has drifted from the local canonical selection.");
+  }
+
+  if (hermesRuntime?.error) {
+    warnings.push(`Failed to read Hermes auth.json: ${hermesRuntime.error}`);
+  } else if (localStoreReady && hermesRuntime?.drift) {
+    warnings.push("Hermes auth.json managed openai-codex projection has drifted from the local canonical store.");
+  } else if (context.hermesAuthExists && hermesRuntime?.providerCredential && hermesRuntime.matchingProfileIds.length === 0) {
+    warnings.push("Current Hermes openai-codex provider state does not match any stored profile.");
+  } else if (hermesRuntime?.ambiguous) {
+    warnings.push("Current Hermes openai-codex provider state matches multiple stored profiles.");
   }
 
   return warnings;
@@ -510,6 +654,14 @@ async function writeCodexSelection(options, credential) {
   });
 }
 
+async function writeHermesProjection(options, store, projectionOptions = {}) {
+  const context = resolvePaths(options);
+  fs.mkdirSync(path.dirname(context.hermesAuthPath), { recursive: true });
+  await withFileLock(context.hermesAuthPath, async () => {
+    writeHermesAuthFile(context.hermesAuthPath, store, projectionOptions);
+  });
+}
+
 async function writeRuntimeAuthProjection(options, store) {
   const context = resolvePaths(options);
   fs.mkdirSync(path.dirname(context.runtimeAuthStorePath), { recursive: true });
@@ -528,11 +680,17 @@ async function syncRuntimeConfig(options, store, configOptions = {}) {
 }
 
 async function exportRuntimeFromLocal(options, store, exportOptions = {}) {
+  const preferredOrder = getPreferredOrder(store);
+  const selectedProfileId = exportOptions.preferredProfileId || preferredOrder[0] || null;
   await writeRuntimeAuthProjection(options, store);
   await syncRuntimeConfig(options, store, { touch: Boolean(exportOptions.touchConfig) });
+  await writeHermesProjection(options, store, {
+    preferredOrder,
+    selectedProfileId,
+  });
 
-  if (exportOptions.preferredProfileId) {
-    await touchRuntimeSelection(options, exportOptions.preferredProfileId);
+  if (selectedProfileId) {
+    await touchRuntimeSelection(options, selectedProfileId);
   }
 
   if (exportOptions.codexCredential && isCodexCompatibleCredential(exportOptions.codexCredential)) {
@@ -627,6 +785,20 @@ function resolveImportTargetProfileId(localStore, incomingProfileId, incomingCre
     .map(([profileId]) => profileId);
   if (accountMatches.length === 1) {
     return accountMatches[0];
+  }
+
+  const emailMatches = profiles
+    .filter(([, credential]) => {
+      if (!shouldMatchImportByAccountId(credential, incomingCredential)) {
+        return false;
+      }
+      const existingEmail = normalizeEmail(resolveEmail(credential));
+      const incomingEmail = normalizeEmail(resolveEmail(incomingCredential));
+      return Boolean(existingEmail) && Boolean(incomingEmail) && existingEmail === incomingEmail;
+    })
+    .map(([profileId]) => profileId);
+  if (emailMatches.length === 1) {
+    return emailMatches[0];
   }
 
   return null;
@@ -741,6 +913,81 @@ function previewBundleImport(localStore, importedStore) {
   };
 }
 
+function mergeImportedProfiles(localStore, importedProfiles, importedOrder = [], importedLastGood = null) {
+  const nextImportedStore = buildLocalAuthStore({
+    profiles: importedProfiles,
+    order: importedOrder.length > 0
+      ? {
+          [CODEX_PROVIDER]: importedOrder,
+        }
+      : undefined,
+    lastGood: importedLastGood
+      ? {
+          [CODEX_PROVIDER]: importedLastGood,
+        }
+      : undefined,
+  });
+  return previewBundleImport(localStore, nextImportedStore).store;
+}
+
+function mergeHermesSidecarIntoStore(store, hermesRuntime, options = {}) {
+  let nextStore = buildLocalAuthStore(store);
+  const managedProfiles = extractHermesManagedProfiles(hermesRuntime);
+  const managedProfileIds = managedProfiles.map((entry) => entry.profileId);
+  const selectedCredential = extractHermesProviderCredential(hermesRuntime);
+
+  if (managedProfiles.length > 0) {
+    const importedProfiles = Object.fromEntries(
+      managedProfiles.map((entry) => [entry.profileId, entry.credential]),
+    );
+    nextStore = mergeImportedProfiles(
+      nextStore,
+      importedProfiles,
+      managedProfileIds,
+      managedProfileIds.includes(options.selectedProfileId) ? options.selectedProfileId : null,
+    );
+  }
+
+  if (selectedCredential) {
+    const existingIds = new Set(Object.keys(nextStore.profiles));
+    const profileId = createBootstrapProfileId(existingIds, selectedCredential, "hermes");
+    nextStore = mergeImportedProfiles(nextStore, {
+      [profileId]: selectedCredential,
+    });
+
+    const matchedProfileIds = listCodexProfiles(nextStore)
+      .filter((entry) => credentialsShareIdentity(entry.credential, selectedCredential))
+      .map((entry) => entry.profileId);
+    if (matchedProfileIds.length === 1) {
+      const selectedProfileId = matchedProfileIds[0];
+      const currentOrder = getPreferredOrder(nextStore);
+      nextStore = applyOrderToAuthStore(nextStore, [
+        selectedProfileId,
+        ...currentOrder.filter((profileId) => profileId !== selectedProfileId),
+      ]);
+    }
+  }
+
+  return nextStore;
+}
+
+function mergeCodexSidecarIntoStore(store, codexAuth) {
+  if (!codexAuth) {
+    return buildLocalAuthStore(store);
+  }
+
+  const matches = listCodexProfiles(store)
+    .filter((entry) => codexAuthExactlyMatchesCredential(codexAuth, entry.credential))
+    .map((entry) => entry.profileId);
+  if (matches.length !== 1) {
+    return buildLocalAuthStore(store);
+  }
+
+  const nextStore = structuredClone(store);
+  nextStore.profiles[matches[0]] = mergeCodexAuthIntoCredential(nextStore.profiles[matches[0]], codexAuth);
+  return buildLocalAuthStore(nextStore);
+}
+
 export async function loadDashboardState(options = {}, deps = {}) {
   const context = resolvePaths(options);
   const config = readOpenClawConfig(context.configPath);
@@ -802,6 +1049,10 @@ export async function loadDashboardState(options = {}, deps = {}) {
   const selectedProfileId = getSelectedProfileId(authStore, configOrder);
   const runtimeAuth = inspectOpenClawRuntime(context, localStoreReady ? authStore : null);
   const codexRuntime = inspectCodexAuthFile(context, finalProfiles);
+  const hermesRuntime = inspectHermesAuthFile(context, localStoreReady ? authStore : null, {
+    preferredOrder: currentEffectiveOrder,
+    selectedProfileId,
+  });
   const profileMap = new Map(finalProfiles.map((entry) => [entry.profileId, entry.credential]));
 
   const storedOrder = getStoredOrder(authStore);
@@ -811,7 +1062,9 @@ export async function loadDashboardState(options = {}, deps = {}) {
       const credential = profileMap.get(row.profileId);
       const recommendationBlockedReason = getRecommendationBlockedReason(row);
       const codexCompatible = isCodexCompatibleCredential(credential);
+      const hermesCompatible = isHermesCompatibleCredential(credential);
       const codexStatusReason = getCodexCompatibilityIssue(credential);
+      const hermesStatusReason = getHermesCompatibilityIssue(credential);
       const canLinkCurrentCodex =
         !codexCompatible &&
         codexRuntime.matchingProfileIds.length === 1 &&
@@ -824,9 +1077,12 @@ export async function loadDashboardState(options = {}, deps = {}) {
         recommendationBlockedReason,
         codexCompatible,
         codexStatusReason,
+        hermesCompatible,
+        hermesStatusReason,
         canLinkCurrentCodex,
         openClawCurrent: row.currentOrderIndex === 0,
         codexCurrent: codexRuntime.linkedProfileId === row.profileId,
+        hermesCurrent: hermesRuntime.linkedProfileId === row.profileId,
         isSelectedEverywhere: codexRuntime.linkedProfileId === row.profileId && row.currentOrderIndex === 0,
       };
     })
@@ -867,6 +1123,7 @@ export async function loadDashboardState(options = {}, deps = {}) {
     context,
     codexRuntime,
     runtimeAuth,
+    hermesRuntime,
     localStoreReady,
   );
 
@@ -882,6 +1139,7 @@ export async function loadDashboardState(options = {}, deps = {}) {
     codexAuth: buildCodexSummary(context, codexRuntime, {
       openClawSelectedProfileId: selectedProfileId,
     }),
+    hermesAuth: buildHermesSummary(context, hermesRuntime),
     currentEffectiveOrder,
     storedOrder,
     configOrder,
@@ -909,6 +1167,7 @@ export async function loadDashboardState(options = {}, deps = {}) {
       canExportBundle: localStoreReady,
       canRebuildRuntime: localStoreReady,
       canAbsorbRuntime: localStoreReady && context.runtimeAuthStoreExists,
+      canAbsorbHermes: localStoreReady && context.hermesAuthExists,
     },
   };
 }
@@ -1096,28 +1355,32 @@ export async function switchProfile(options, profileId, deps = {}) {
   if (!credential) {
     throw new Error(`Profile "${profileId}" was not found in the local store.`);
   }
-  if (!isCodexCompatibleCredential(credential)) {
-    throw new Error(`Profile "${profileId}" is not Codex-compatible yet: ${getCodexCompatibilityIssue(credential)}.`);
-  }
 
   let exportCredential = credential;
-  const resolved = await resolveCredentialToken(credential, {
-    proxyConfig: deps.proxyConfig,
-  });
-  if (resolved.updated) {
-    exportCredential = resolved.credential;
-    await updateAuthStore(options, (nextStore) => {
-      const next = structuredClone(nextStore);
-      next.profiles[profileId] = mergeRefreshedCredential(next.profiles[profileId], resolved.credential);
-      return next;
-    });
+  if (credential?.type === "oauth") {
+    const resolved = deps.refreshImpl
+      ? await resolveCredentialToken(credential, {
+        proxyConfig: deps.proxyConfig,
+        refreshImpl: deps.refreshImpl,
+      })
+      : await resolveCredentialToken(credential, {
+        proxyConfig: deps.proxyConfig,
+      });
+    if (resolved.updated) {
+      exportCredential = resolved.credential;
+      await updateAuthStore(options, (nextStore) => {
+        const next = structuredClone(nextStore);
+        next.profiles[profileId] = mergeRefreshedCredential(next.profiles[profileId], resolved.credential);
+        return next;
+      });
+    }
   }
 
   const order = [profileId, ...currentOrder.filter((entry) => entry !== profileId)];
   const nextStore = await updateAuthStore(options, (nextStore) => applyOrderToAuthStore(nextStore, order));
   await exportRuntimeFromLocal(options, nextStore, {
     preferredProfileId: profileId,
-    codexCredential: exportCredential,
+    codexCredential: isCodexCompatibleCredential(exportCredential) ? exportCredential : null,
   });
   return await loadDashboardState(options, deps);
 }
@@ -1152,7 +1415,6 @@ export async function switchCodexProfile(options, profileId, deps = {}) {
       next.profiles[profileId] = mergeRefreshedCredential(next.profiles[profileId], resolved.credential);
       return next;
     });
-    await writeRuntimeAuthProjection(options, nextStore);
   }
 
   await writeCodexSelection(options, exportCredential);
@@ -1221,17 +1483,14 @@ export async function bootstrapLocalStore(options, deps = {}) {
     ? buildLocalAuthStore(readRuntimeAuthStore(context))
     : buildLocalAuthStore({});
 
+  if (context.hermesAuthExists) {
+    nextStore = mergeHermesSidecarIntoStore(nextStore, readHermesAuthFile(context.hermesAuthPath), {
+      selectedProfileId: null,
+    });
+  }
+
   if (context.codexAuthExists) {
-    const codexAuth = readCodexAuthFile(context.codexAuthPath);
-    if (codexAuth) {
-      const matches = listCodexProfiles(nextStore)
-        .filter((entry) => codexAuthExactlyMatchesCredential(codexAuth, entry.credential))
-        .map((entry) => entry.profileId);
-      if (matches.length === 1) {
-        nextStore = structuredClone(nextStore);
-        nextStore.profiles[matches[0]] = mergeCodexAuthIntoCredential(nextStore.profiles[matches[0]], codexAuth);
-      }
-    }
+    nextStore = mergeCodexSidecarIntoStore(nextStore, readCodexAuthFile(context.codexAuthPath));
   }
 
   fs.mkdirSync(path.dirname(context.localAuthStorePath), { recursive: true });
@@ -1278,6 +1537,21 @@ export async function absorbOpenClawRuntime(options, deps = {}) {
     next.usageStats = runtimeStore.usageStats;
     return next;
   });
+
+  return await loadDashboardState(options, deps);
+}
+
+export async function absorbHermesRuntime(options, deps = {}) {
+  const context = resolvePaths(options);
+  ensureLocalStoreInitialized(context);
+  if (!context.hermesAuthExists) {
+    throw new Error("Hermes auth.json does not exist.");
+  }
+
+  const hermesRuntime = readHermesAuthFile(context.hermesAuthPath);
+  await updateAuthStore(options, (store) => mergeHermesSidecarIntoStore(store, hermesRuntime, {
+    selectedProfileId: null,
+  }));
 
   return await loadDashboardState(options, deps);
 }

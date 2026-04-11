@@ -2251,7 +2251,7 @@ export function renderHtml() {
                     </button>
                     <button id="rebuildRuntimeButton" class="toolbar-menu-button" type="button" data-toolbar-action="rebuild">
                       <span class="toolbar-menu-button-title">重建运行文件</span>
-                      <span class="toolbar-menu-button-copy">按本地号池重写 OpenClaw 与 Codex runtime 文件</span>
+                      <span class="toolbar-menu-button-copy">按本地号池重写 OpenClaw、Hermes 以及兼容的 Codex 运行投影</span>
                     </button>
                     <button id="absorbRuntimeButton" class="toolbar-menu-button" type="button" data-toolbar-action="absorb">
                       <span class="toolbar-menu-button-title">吸收运行数据</span>
@@ -2632,6 +2632,10 @@ export function renderHtml() {
                     <div id="codexValue" class="snapshot-value">-</div>
                   </div>
                   <div class="snapshot-item">
+                    <div class="stat-label">Hermes auth 位置</div>
+                    <div id="hermesValue" class="snapshot-value">-</div>
+                  </div>
+                  <div class="snapshot-item">
                     <div class="stat-label">配置文件位置</div>
                     <div id="configValue" class="snapshot-value">-</div>
                   </div>
@@ -2872,6 +2876,7 @@ export function renderHtml() {
       const authValue = document.getElementById("authValue");
       const runtimeAuthValue = document.getElementById("runtimeAuthValue");
       const codexValue = document.getElementById("codexValue");
+      const hermesValue = document.getElementById("hermesValue");
       const configValue = document.getElementById("configValue");
       const timeValue = document.getElementById("timeValue");
       const importBundleInput = document.getElementById("importBundleInput");
@@ -2926,26 +2931,26 @@ export function renderHtml() {
         },
         apply: {
           label: "应用推荐",
-          description: "把推荐顺序写回本地号池，并更新 OpenClaw runtime 里的 openai-codex 配置。",
-          mutates: "会更新本地顺序，并写回 OpenClaw runtime；共享模式下也可能同步 Codex",
+          description: "把推荐顺序写回本地号池，并刷新 OpenClaw 与 Hermes 的 openai-codex 投影。",
+          mutates: "会更新本地顺序，并写回 OpenClaw 与 Hermes；共享模式下也可能同步 Codex",
           safe: "独立避让和仅手动模式不会自动切换 Codex 当前账号",
         },
         add: {
           label: "新增账号",
           description: "启动新的 OAuth 登录流程，把一个账号加入本地号池。",
-          mutates: "会新增本地 profile，并同步运行文件",
+          mutates: "会新增本地 profile，并同步 OpenClaw、Hermes 和兼容的 Codex 投影",
           safe: "不会覆盖同名账号",
         },
         bootstrap: {
           label: "初始化本地库",
-          description: "第一次使用时，把现有运行文件导入到项目本地号池。",
+          description: "第一次使用时，把现有 OpenClaw、Hermes 与 Codex sidecar 状态导入到项目本地号池。",
           mutates: "会创建 ./.local/auth-store.json",
           safe: "不会偷偷覆盖已经存在的本地号池",
         },
         import: {
           label: "导入号池",
           description: "导入加密 bundle，先预览再合并到本地号池。",
-          mutates: "会更新本地号池，并同步 OpenClaw runtime 里的 codex 配置",
+          mutates: "会更新本地号池，并同步 OpenClaw、Hermes 和兼容的 Codex 投影",
           safe: "不会直接无提示覆盖现有号池",
         },
         sync: {
@@ -2956,8 +2961,8 @@ export function renderHtml() {
         },
         rebuild: {
           label: "重建运行文件",
-          description: "按本地号池重建 Codex runtime，并更新 OpenClaw runtime 里的 openai-codex 配置。",
-          mutates: "会更新 auth-profiles.json 里的 codex 配置，并重写 ~/.codex/auth.json",
+          description: "按本地号池重建 OpenClaw、Hermes 和兼容的 Codex 运行投影。",
+          mutates: "会更新 auth-profiles.json、Hermes auth.json，并在兼容时重写 ~/.codex/auth.json",
           safe: "不会改动本地号池内容",
         },
         absorb: {
@@ -4226,13 +4231,13 @@ export function renderHtml() {
           return "";
         }
         if (note.includes("Applying order updates")) {
-          return "应用推荐会更新 OpenClaw runtime；只有显式要求同步时才会改写 Codex 当前账号。";
+          return "应用推荐会更新 OpenClaw 和 Hermes 投影；只有显式要求同步时才会改写 Codex 当前账号。";
         }
         if (note.includes("Setting a profile as current")) {
-          return "“设为当前”会同时切换 OpenClaw 当前账号和 Codex 当前账号。";
+          return "“设为当前”会切换 OpenClaw 当前账号，并在兼容时同步 Hermes 和 Codex。";
         }
         if (note.includes("project-local store is the canonical source of truth")) {
-          return "项目本地号池是真源，OpenClaw 和 Codex 文件都只是导出结果。";
+          return "项目本地号池是真源，OpenClaw、Hermes 和 Codex 文件都只是导出结果。";
         }
         return note;
       }
@@ -4242,10 +4247,10 @@ export function renderHtml() {
           return "";
         }
         if (note.includes("Local auth store was not found")) {
-          return "还没初始化项目本地号池。可以从当前运行文件初始化，或者直接导入加密 bundle。";
+          return "还没初始化项目本地号池。可以从当前 OpenClaw、Hermes 或 Codex sidecar 初始化，或者直接导入加密 bundle。";
         }
         if (note.includes("Local auth store is not initialized yet")) {
-          return "本地号池还没初始化，当前不会把运行时文件当真源。";
+          return "本地号池还没初始化，当前不会自动把 OpenClaw、Hermes 或 Codex sidecar 回灌为真源。";
         }
         if (note.includes("openclaw.json was not found")) {
           return "还没找到 OpenClaw 配置，补齐配置功能暂时不可用。";
@@ -4274,6 +4279,15 @@ export function renderHtml() {
         if (note.includes("OpenClaw runtime auth-profiles.json managed openai-codex entries have drifted")) {
           return "OpenClaw runtime 里的 codex 配置已经偏离本地号池，建议重建运行文件。";
         }
+        if (note.includes("Hermes auth.json managed openai-codex projection has drifted")) {
+          return "Hermes 里的 openai-codex 投影已经偏离本地号池，建议重建运行文件。";
+        }
+        if (note.includes("Current Hermes openai-codex provider state does not match any stored profile")) {
+          return "当前 Hermes 选中的 openai-codex 账号还没有纳入本地号池。";
+        }
+        if (note.includes("Current Hermes openai-codex provider state matches multiple stored profiles")) {
+          return "当前 Hermes 选中的 openai-codex 账号和多个本地账号重复，系统无法安全自动关联。";
+        }
         if (note.includes("Current ~/.codex/auth.json does not match any stored profile")) {
           return "当前 Codex 登录还没有纳入这个仓库，所以暂时不能统一切换。";
         }
@@ -4288,6 +4302,9 @@ export function renderHtml() {
         }
         if (note.includes("Failed to read OpenClaw auth-profiles.json")) {
           return "读取 OpenClaw runtime auth-profiles 失败: " + note.split(": ").slice(1).join(": ");
+        }
+        if (note.includes("Failed to read Hermes auth.json")) {
+          return "读取 Hermes auth.json 失败: " + note.split(": ").slice(1).join(": ");
         }
         return note;
       }
@@ -5049,6 +5066,7 @@ export function renderHtml() {
         authValue.textContent = data.context.localAuthStorePath;
         runtimeAuthValue.textContent = data.context.runtimeAuthStorePath;
         codexValue.textContent = data.context.codexAuthPath;
+        hermesValue.textContent = data.context.hermesAuthPath;
         configValue.textContent = data.context.configPath;
         timeValue.textContent = new Date(data.generatedAt).toLocaleString("zh-CN", { hour12: false });
         renderOrder(effectiveOrder, data.currentEffectiveOrder, data.recommendedOrder[0]);
@@ -5239,7 +5257,7 @@ export function renderHtml() {
         try {
           const data = await postJson("/api/apply-order", { order });
           render(data);
-          setBusy(false, "顺序已更新，仅影响 OpenClaw 运行顺序", "success");
+          setBusy(false, "顺序已更新，OpenClaw 与 Hermes 投影已刷新", "success");
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }
@@ -5320,11 +5338,11 @@ export function renderHtml() {
       }
 
       async function rebuildRuntimeFiles() {
-        setBusy(true, "正在更新 OpenClaw runtime 的 codex 配置...", "info");
+        setBusy(true, "正在重建 OpenClaw、Hermes 与兼容的 Codex 运行投影...", "info");
         try {
           const data = await postJson("/api/rebuild-runtime");
           render(data);
-          setBusy(false, "OpenClaw runtime 的 codex 配置已按本地号池更新", "success");
+          setBusy(false, "运行投影已按本地号池重建", "success");
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }
@@ -5407,12 +5425,25 @@ export function renderHtml() {
       }
 
       async function switchCurrentProfile(row) {
-        setBusy(true, "正在切换当前账号...", "info");
+        setBusy(true, "正在切换当前账号并刷新运行投影...", "info");
         try {
           const data = await postJson("/api/switch-profile", { profileId: row.profileId });
           render(data);
-          markCodexRestartRequired("OpenClaw 与 Codex 当前账号都已切换，重启 Codex 后生效。");
-          setBusy(false, "当前账号已切换，重启 Codex 后生效", "success");
+          const targets = ["OpenClaw"];
+          if (row.hermesCompatible) {
+            targets.push("Hermes");
+          }
+          if (row.codexCompatible) {
+            targets.push("Codex");
+            markCodexRestartRequired("Codex 当前账号已同步到当前选择，重启 Codex 后生效。");
+          }
+          setBusy(
+            false,
+            row.codexCompatible
+              ? targets.join("、") + " 当前账号已更新，重启 Codex 后生效"
+              : targets.join("、") + " 当前账号已更新",
+            "success",
+          );
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         }
