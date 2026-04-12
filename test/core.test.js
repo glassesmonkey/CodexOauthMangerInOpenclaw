@@ -14,6 +14,7 @@ import { extractHermesManagedPoolProfileIds, readHermesAuthFile } from "../src/h
 import { openBrowser, parseArgs } from "../src/index.js";
 import { buildConfigAudit, buildWarnings, recommendProfileOrder } from "../src/order.js";
 import { clearAutoAuthProfileOverrides, readSessionStore } from "../src/session-store.js";
+import { TOKEN_KEEPALIVE_REFRESH_WINDOW_MS } from "../src/constants.js";
 import {
   applyOrder,
   bootstrapLocalStore,
@@ -2323,13 +2324,18 @@ test("runTokenKeepalive refreshes OAuth profiles, updates maintenance, and rewri
     );
 
     assert.equal(result.refreshedCount, 2);
+    assert.equal(result.oauthProfileCount, 2);
+    assert.equal(result.eligibleProfileCount, 2);
+    assert.equal(result.skippedProfileCount, 0);
     assert.equal(result.exportedRuntime, true);
     assert.deepEqual(result.changedProfileIds, ["openai-codex:default", "openai-codex:work"]);
+    assert.deepEqual(result.refreshedProfileIds, ["openai-codex:default", "openai-codex:work"]);
 
     const localStore = readAuthStore(path.join(localStateDir, "auth-store.json"));
     assert.equal(localStore.profiles["openai-codex:default"].access, "next-default-refresh");
     assert.equal(localStore.profiles["openai-codex:work"].refresh, "next-work-refresh");
     assert.ok(localStore.maintenance?.lastAttemptAt);
+    assert.equal(localStore.maintenance?.lastSuccessAt, localStore.maintenance?.lastAttemptAt);
     assert.deepEqual(localStore.maintenance?.lastChangedProfileIds, ["openai-codex:default", "openai-codex:work"]);
 
     const runtimeRaw = JSON.parse(fs.readFileSync(path.join(agentDir, "auth-profiles.json"), "utf8"));
@@ -2346,6 +2352,128 @@ test("runTokenKeepalive refreshes OAuth profiles, updates maintenance, and rewri
       "openai-codex:default",
       "openai-codex:work",
     ]);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("runTokenKeepalive only refreshes OAuth profiles inside the 48-hour window", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-keepalive-window-"));
+  const localStateDir = path.join(stateDir, ".local");
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:near": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "near-access",
+        refresh: "near-refresh",
+        expires: Date.now() + TOKEN_KEEPALIVE_REFRESH_WINDOW_MS - 60_000,
+        accountId: "account-near",
+        email: "near@example.com",
+      },
+      "openai-codex:far": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "far-access",
+        refresh: "far-refresh",
+        expires: Date.now() + TOKEN_KEEPALIVE_REFRESH_WINDOW_MS + 60_000,
+        accountId: "account-far",
+        email: "far@example.com",
+      },
+    },
+    maintenance: {
+      lastAttemptAt: "2026-04-10T10:00:00.000Z",
+      lastSuccessAt: "2026-04-10T09:00:00.000Z",
+      lastError: null,
+      lastChangedProfileIds: ["openai-codex:older"],
+    },
+  });
+
+  try {
+    const refreshed = [];
+    const result = await runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main" },
+      {
+        refreshImpl: async (refreshToken) => {
+          refreshed.push(refreshToken);
+          return {
+            access: `next-${refreshToken}`,
+            refresh: `next-${refreshToken}`,
+            expires: Date.now() + 60_000,
+          };
+        },
+      },
+    );
+
+    assert.deepEqual(refreshed, ["near-refresh"]);
+    assert.equal(result.oauthProfileCount, 2);
+    assert.equal(result.eligibleProfileCount, 1);
+    assert.equal(result.skippedProfileCount, 1);
+    assert.equal(result.refreshedCount, 1);
+    assert.deepEqual(result.refreshedProfileIds, ["openai-codex:near"]);
+    assert.deepEqual(result.skippedProfileIds, ["openai-codex:far"]);
+
+    const localStore = readAuthStore(path.join(localStateDir, "auth-store.json"));
+    assert.equal(localStore.profiles["openai-codex:near"].access, "next-near-refresh");
+    assert.equal(localStore.profiles["openai-codex:far"].access, "far-access");
+    assert.equal(localStore.maintenance?.lastSuccessAt, localStore.maintenance?.lastAttemptAt);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("runTokenKeepalive keeps last success time when nothing enters the refresh window", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-keepalive-no-refresh-"));
+  const localStateDir = path.join(stateDir, ".local");
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:far": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "far-access",
+        refresh: "far-refresh",
+        expires: Date.now() + TOKEN_KEEPALIVE_REFRESH_WINDOW_MS + 3_600_000,
+        accountId: "account-far",
+        email: "far@example.com",
+      },
+    },
+    maintenance: {
+      lastAttemptAt: "2026-04-10T10:00:00.000Z",
+      lastSuccessAt: "2026-04-10T09:00:00.000Z",
+      lastError: null,
+      lastChangedProfileIds: [],
+    },
+  });
+
+  try {
+    let refreshCalled = false;
+    const result = await runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main" },
+      {
+        refreshImpl: async () => {
+          refreshCalled = true;
+          return {
+            access: "should-not-run",
+            refresh: "should-not-run",
+            expires: Date.now() + 60_000,
+          };
+        },
+      },
+    );
+
+    assert.equal(refreshCalled, false);
+    assert.equal(result.oauthProfileCount, 1);
+    assert.equal(result.eligibleProfileCount, 0);
+    assert.equal(result.skippedProfileCount, 1);
+    assert.equal(result.refreshedCount, 0);
+
+    const localStore = readAuthStore(path.join(localStateDir, "auth-store.json"));
+    assert.ok(localStore.maintenance?.lastAttemptAt);
+    assert.notEqual(localStore.maintenance?.lastAttemptAt, "2026-04-10T10:00:00.000Z");
+    assert.equal(localStore.maintenance?.lastSuccessAt, "2026-04-10T09:00:00.000Z");
+    assert.deepEqual(localStore.maintenance?.lastChangedProfileIds, []);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }

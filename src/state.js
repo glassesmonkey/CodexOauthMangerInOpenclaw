@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { CODEX_PROVIDER, PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT } from "./constants.js";
+import {
+  CODEX_PROVIDER,
+  PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT,
+  TOKEN_KEEPALIVE_REFRESH_WINDOW_MS,
+} from "./constants.js";
 import {
   applyOrderToAuthStore,
   buildLocalAuthStore,
@@ -33,6 +37,7 @@ import {
   loginWithCodex,
   normalizeManualAuthorizationInput,
   resolveCredentialToken,
+  shouldRefreshOAuthCredential,
 } from "./codex-auth.js";
 import {
   getConfigCodexOrder,
@@ -1281,8 +1286,11 @@ export async function runTokenKeepalive(options, deps = {}) {
   ensureLocalStoreInitialized(context);
   const configOrder = context.configExists ? getConfigCodexOrder(readOpenClawConfig(context.configPath)) : [];
   const attemptedAt = new Date().toISOString();
+  const oauthProfileIds = [];
+  const eligibleProfileIds = [];
   const failedProfiles = [];
   const changedProfileIds = [];
+  const refreshedProfileIds = [];
   let exportedRuntime = false;
 
   const nextStore = buildLocalAuthStore(readLocalAuthStore(context));
@@ -1292,19 +1300,29 @@ export async function runTokenKeepalive(options, deps = {}) {
       continue;
     }
 
+    oauthProfileIds.push(entry.profileId);
+    if (shouldRefreshOAuthCredential(entry.credential, TOKEN_KEEPALIVE_REFRESH_WINDOW_MS)) {
+      eligibleProfileIds.push(entry.profileId);
+    }
+
     try {
       const resolved = deps.refreshImpl
         ? await resolveCredentialToken(entry.credential, {
           proxyConfig: deps.proxyConfig,
           refreshImpl: deps.refreshImpl,
+          refreshWindowMs: TOKEN_KEEPALIVE_REFRESH_WINDOW_MS,
         })
         : await resolveCredentialToken(entry.credential, {
           proxyConfig: deps.proxyConfig,
+          refreshWindowMs: TOKEN_KEEPALIVE_REFRESH_WINDOW_MS,
         });
 
       if (resolved.updated) {
         nextStore.profiles[entry.profileId] = mergeRefreshedCredential(nextStore.profiles[entry.profileId], resolved.credential);
         changedProfileIds.push(entry.profileId);
+      }
+      if (resolved.refreshed) {
+        refreshedProfileIds.push(entry.profileId);
       }
     } catch (error) {
       failedProfiles.push({
@@ -1314,12 +1332,16 @@ export async function runTokenKeepalive(options, deps = {}) {
     }
   }
 
-  const finalStore = applyMaintenanceUpdate(nextStore, {
+  const maintenanceUpdate = {
     lastAttemptAt: attemptedAt,
-    lastSuccessAt: attemptedAt,
     lastError: summarizeFailedProfiles(failedProfiles),
     lastChangedProfileIds: changedProfileIds,
-  });
+  };
+  if (refreshedProfileIds.length > 0) {
+    maintenanceUpdate.lastSuccessAt = attemptedAt;
+  }
+
+  const finalStore = applyMaintenanceUpdate(nextStore, maintenanceUpdate);
 
   fs.mkdirSync(path.dirname(context.localAuthStorePath), { recursive: true });
   await withFileLock(context.localAuthStorePath, async () => {
@@ -1335,10 +1357,17 @@ export async function runTokenKeepalive(options, deps = {}) {
     exportedRuntime = true;
   }
 
+  const skippedProfileIds = oauthProfileIds.filter((profileId) => !eligibleProfileIds.includes(profileId));
+
   return {
     attemptedAt,
-    refreshedCount: changedProfileIds.length,
+    oauthProfileCount: oauthProfileIds.length,
+    eligibleProfileCount: eligibleProfileIds.length,
+    skippedProfileCount: skippedProfileIds.length,
+    refreshedCount: refreshedProfileIds.length,
     changedProfileIds,
+    refreshedProfileIds,
+    skippedProfileIds,
     failedProfiles,
     exportedRuntime,
     state: await loadDashboardState(options, deps),

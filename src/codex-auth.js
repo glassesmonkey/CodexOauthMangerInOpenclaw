@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import http from "node:http";
+import { OAUTH_REFRESH_WINDOW_MS } from "./constants.js";
 import { createUsageFetch } from "./usage-fetch.js";
 
 const OPENAI_AUTH_CLAIM = "https://api.openai.com/auth";
@@ -381,8 +382,14 @@ export function enrichOpenAICodexCredential(credential) {
   return nextCredential;
 }
 
+export function shouldRefreshOAuthCredential(credential, refreshWindowMs = OAUTH_REFRESH_WINDOW_MS) {
+  const expiresAt = typeof credential?.expires === "number" ? credential.expires : 0;
+  return expiresAt <= Date.now() + Math.max(0, refreshWindowMs);
+}
+
 export async function resolveCredentialToken(credential, options = {}) {
   const refreshImpl = options.refreshImpl ?? refreshAccessToken;
+  const refreshWindowMs = options.refreshWindowMs ?? OAUTH_REFRESH_WINDOW_MS;
   const proxyFetch = createUsageFetch(options.proxyConfig);
 
   if (credential?.type === "oauth") {
@@ -391,12 +398,12 @@ export async function resolveCredentialToken(credential, options = {}) {
     if (typeof enrichedCredential.access !== "string" || !enrichedCredential.access.trim()) {
       throw new Error("OAuth profile is missing access token");
     }
-    const expiresAt = typeof enrichedCredential.expires === "number" ? enrichedCredential.expires : 0;
-    if (expiresAt > Date.now() + 30_000) {
+    if (!shouldRefreshOAuthCredential(enrichedCredential, refreshWindowMs)) {
       return {
         token: enrichedCredential.access,
         credential: enrichedCredential,
         updated: enrichedCredential !== credential,
+        refreshed: false,
       };
     }
     if (typeof enrichedCredential.refresh !== "string" || !enrichedCredential.refresh.trim()) {
@@ -419,6 +426,7 @@ export async function resolveCredentialToken(credential, options = {}) {
       token: nextCredential.access,
       credential: nextCredential,
       updated: true,
+      refreshed: true,
     };
   }
 

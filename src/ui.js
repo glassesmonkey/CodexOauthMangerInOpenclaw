@@ -2430,7 +2430,7 @@ export function renderHtml() {
 
                 <div class="settings-section">
                   <button id="tokenRefreshButton" class="button-primary" type="button">立即刷新 Token</button>
-                  <p class="field-note">只刷新 OAuth token 生命周期，不会自动改推荐顺序。</p>
+                  <p class="field-note">只刷新 48 小时内将过期的 OAuth token，不会自动改推荐顺序。</p>
                 </div>
 
                 <div class="settings-section">
@@ -5208,10 +5208,20 @@ export function renderHtml() {
             render(await loadStateData());
           }
           const failedCount = Array.isArray(result.failedProfiles) ? result.failedProfiles.length : 0;
+          const totalCount = Number.isFinite(result.oauthProfileCount) ? result.oauthProfileCount : 0;
+          const eligibleCount = Number.isFinite(result.eligibleProfileCount) ? result.eligibleProfileCount : 0;
+          const refreshedCount = Number.isFinite(result.refreshedCount) ? result.refreshedCount : 0;
+          const skippedCount = Number.isFinite(result.skippedProfileCount) ? result.skippedProfileCount : Math.max(0, totalCount - eligibleCount);
+          const summary = [
+            "检查 " + totalCount + " 个账号",
+            "命中窗口 " + eligibleCount + " 个",
+            "刷新 " + refreshedCount + " 个",
+            "跳过 " + skippedCount + " 个",
+          ];
           if (failedCount > 0) {
-            setBusy(false, okMessage + "，但有 " + failedCount + " 个账号失败", "warn");
+            setBusy(false, okMessage + "，" + summary.join("，") + "，失败 " + failedCount + " 个", "warn");
           } else {
-            setBusy(false, okMessage, "success");
+            setBusy(false, okMessage + "，" + summary.join("，"), "success");
           }
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
