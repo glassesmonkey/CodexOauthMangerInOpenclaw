@@ -20,8 +20,14 @@ export function buildQuotaBoardSummary(rows) {
     let nextResetAt = null;
 
     for (const row of Array.isArray(items) ? items : []) {
+      const secondaryRemaining = normalizeRemainingPercent(row?.secondary);
       const remainingPercent = normalizeRemainingPercent(row?.[windowKey]);
       if (remainingPercent == null) {
+        continue;
+      }
+
+      // 5h 总剩余只反映“现在还能实际使用”的额度，因此需要同时满足 7d 未耗尽。
+      if (windowKey === "primary" && (secondaryRemaining == null || secondaryRemaining <= 0)) {
         continue;
       }
 

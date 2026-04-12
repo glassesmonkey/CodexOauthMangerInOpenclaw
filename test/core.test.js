@@ -2689,6 +2689,33 @@ test("buildQuotaBoardSummary excludes unreadable accounts from capacity", () => 
   assert.equal(summary.primary.segments.length, 1);
 });
 
+test("buildQuotaBoardSummary excludes 7d exhausted accounts from 5h totals", () => {
+  const summary = buildQuotaBoardSummary([
+    {
+      profileId: "openai-codex:available",
+      displayLabel: "available@example.com",
+      secondary: { remainingPercent: 35, resetAt: 1_710_000_000 },
+      primary: { remainingPercent: 60, resetAt: 1_710_000_500 },
+    },
+    {
+      profileId: "openai-codex:exhausted-7d",
+      displayLabel: "exhausted@example.com",
+      secondary: { remainingPercent: 0, resetAt: 1_710_100_000 },
+      primary: { remainingPercent: 100, resetAt: 1_710_100_500 },
+    },
+  ]);
+
+  assert.equal(summary.totalAccounts, 2);
+  assert.equal(summary.secondary.totalCapacity, 200);
+  assert.equal(summary.secondary.totalRemaining, 35);
+  assert.equal(summary.secondary.readableCount, 2);
+  assert.equal(summary.primary.totalCapacity, 100);
+  assert.equal(summary.primary.totalRemaining, 60);
+  assert.equal(summary.primary.readableCount, 1);
+  assert.equal(summary.primary.segments.length, 1);
+  assert.equal(summary.primary.segments[0]?.profileId, "openai-codex:available");
+});
+
 test("renderHtml exposes accounts view toggle and compact toolbar structure", () => {
   const html = renderHtml();
 
