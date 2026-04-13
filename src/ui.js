@@ -4870,7 +4870,7 @@ export function renderHtml() {
           metaNode.innerHTML = "";
           metaNode.appendChild(
             createInfoPill(
-              "可读 " + windowSummary.readableCount + "/" + summary.totalAccounts,
+              (title === "5h" ? "可用 " : "可读 ") + windowSummary.readableCount + "/" + summary.totalAccounts,
               windowSummary.readableCount ? "info" : "warn",
             ),
           );
