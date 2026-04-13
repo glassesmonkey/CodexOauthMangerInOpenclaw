@@ -2,8 +2,14 @@ import { PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT } from "./constants.js";
 
 export function buildQuotaBoardSummary(
   rows,
-  primaryRecommendationMinRemainingPercent = PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT,
+  primaryRecommendationMinRemainingPercent = null,
 ) {
+  const resolvedPrimaryRecommendationMinRemainingPercent =
+    typeof primaryRecommendationMinRemainingPercent === "number"
+    && Number.isFinite(primaryRecommendationMinRemainingPercent)
+      ? primaryRecommendationMinRemainingPercent
+      : PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT;
+
   function normalizeRemainingPercent(windowData) {
     return typeof windowData?.remainingPercent === "number" && Number.isFinite(windowData.remainingPercent)
       ? Math.max(0, Math.min(100, windowData.remainingPercent))
@@ -28,7 +34,7 @@ export function buildQuotaBoardSummary(
       return false;
     }
 
-    return remainingPercent > primaryRecommendationMinRemainingPercent;
+    return remainingPercent > resolvedPrimaryRecommendationMinRemainingPercent;
   }
 
   function buildWindowSummary(items, windowKey, label) {

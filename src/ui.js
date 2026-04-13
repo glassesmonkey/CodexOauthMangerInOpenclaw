@@ -2996,6 +2996,7 @@ export function renderHtml() {
       const tokenReminderModalDismissButton = document.getElementById("tokenReminderModalDismissButton");
       const tokenReminderModalFocusButton = document.getElementById("tokenReminderModalFocusButton");
 
+      const PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT = ${JSON.stringify(PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT)};
       ${buildQuotaBoardSummary.toString()}
 
       const TOOLBAR_ACTIONS = {
