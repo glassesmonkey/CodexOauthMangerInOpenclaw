@@ -2625,6 +2625,8 @@ test("renderHtml exposes accounts view toggle and compact toolbar structure", ()
   assert.match(html, /全局可用额度/);
   assert.match(html, /id="quotaBoardSecondaryValue"/);
   assert.match(html, /id="quotaBoardPrimaryValue"/);
+  assert.match(html, /id="quotaBoardPrimaryDetails"/);
+  assert.match(html, /查看可用账号明细/);
   assert.match(html, /id="tabTokenRefresh"/);
   assert.match(html, /刷新 Token/);
   assert.match(html, /id="tokenRefreshButton"/);

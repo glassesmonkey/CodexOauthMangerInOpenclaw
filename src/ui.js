@@ -714,6 +714,74 @@ export function renderHtml() {
         margin-top: 2px;
       }
 
+      .quota-board-details {
+        margin-top: 2px;
+        border-top: 1px dashed rgba(95, 68, 42, 0.14);
+        padding-top: 10px;
+      }
+
+      .quota-board-details summary {
+        cursor: pointer;
+        list-style: none;
+        color: var(--info);
+        font-size: 0.8rem;
+        font-weight: 600;
+      }
+
+      .quota-board-details summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .quota-board-details summary::before {
+        content: "▸";
+        display: inline-block;
+        margin-right: 6px;
+        transition: transform 140ms ease;
+      }
+
+      .quota-board-details[open] summary::before {
+        transform: rotate(90deg);
+      }
+
+      .quota-board-detail-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .quota-board-detail-row {
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.52);
+        border: 1px solid rgba(95, 68, 42, 0.1);
+      }
+
+      .quota-board-detail-label {
+        min-width: 0;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #3e2819;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .quota-board-detail-values {
+        display: inline-flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+
+      .quota-board-detail-empty {
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
       .meta-tag,
       .order-pill {
         display: inline-flex;
@@ -2317,6 +2385,10 @@ export function renderHtml() {
                 </div>
                 <div id="quotaBoardPrimaryBar" class="quota-board-bar" role="progressbar" aria-label="5h total remaining quota" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
                 <div id="quotaBoardPrimaryMeta" class="tag-row quota-board-meta"></div>
+                <details id="quotaBoardPrimaryDetails" class="quota-board-details">
+                  <summary id="quotaBoardPrimaryDetailsSummary">查看可用账号明细</summary>
+                  <div id="quotaBoardPrimaryDetailsList" class="quota-board-detail-list"></div>
+                </details>
               </section>
             </div>
           </section>
@@ -2867,6 +2939,9 @@ export function renderHtml() {
       const quotaBoardPrimaryValue = document.getElementById("quotaBoardPrimaryValue");
       const quotaBoardPrimaryBar = document.getElementById("quotaBoardPrimaryBar");
       const quotaBoardPrimaryMeta = document.getElementById("quotaBoardPrimaryMeta");
+      const quotaBoardPrimaryDetails = document.getElementById("quotaBoardPrimaryDetails");
+      const quotaBoardPrimaryDetailsSummary = document.getElementById("quotaBoardPrimaryDetailsSummary");
+      const quotaBoardPrimaryDetailsList = document.getElementById("quotaBoardPrimaryDetailsList");
       const profilesCountValue = document.getElementById("profilesCountValue");
       const depletedProfilesValue = document.getElementById("depletedProfilesValue");
       const availableProfilesValue = document.getElementById("availableProfilesValue");
@@ -3332,6 +3407,55 @@ export function renderHtml() {
         node.className = "order-pill" + (tone ? " " + tone : "");
         node.textContent = label;
         return node;
+      }
+
+      function renderPrimaryQuotaDetails(windowSummary) {
+        if (!(quotaBoardPrimaryDetailsList instanceof HTMLElement) || !(quotaBoardPrimaryDetails instanceof HTMLElement)) {
+          return;
+        }
+
+        quotaBoardPrimaryDetailsList.innerHTML = "";
+        const count = Array.isArray(windowSummary?.segments) ? windowSummary.segments.length : 0;
+        if (quotaBoardPrimaryDetailsSummary instanceof HTMLElement) {
+          quotaBoardPrimaryDetailsSummary.textContent = count
+            ? "查看可用账号明细（" + count + "）"
+            : "查看可用账号明细";
+        }
+
+        if (!count) {
+          quotaBoardPrimaryDetails.open = false;
+          const empty = document.createElement("div");
+          empty.className = "quota-board-detail-empty";
+          empty.textContent = "当前没有纳入 5h 总剩余的账号。";
+          quotaBoardPrimaryDetailsList.appendChild(empty);
+          return;
+        }
+
+        const fragment = document.createDocumentFragment();
+        windowSummary.segments.forEach((segment) => {
+          const row = document.createElement("div");
+          row.className = "quota-board-detail-row";
+
+          const label = document.createElement("div");
+          label.className = "quota-board-detail-label";
+          label.textContent = segment.displayLabel || segment.profileId || "-";
+          label.title = segment.displayLabel || segment.profileId || "-";
+          row.appendChild(label);
+
+          const values = document.createElement("div");
+          values.className = "quota-board-detail-values";
+          values.appendChild(createInfoPill("5h " + segment.remainingPercent + "%", getQuotaBadgeTone(segment.remainingPercent)));
+          values.appendChild(
+            createInfoPill(
+              segment.secondaryRemainingPercent == null ? "7d 未知" : "7d " + segment.secondaryRemainingPercent + "%",
+              getQuotaBadgeTone(segment.secondaryRemainingPercent),
+            ),
+          );
+          row.appendChild(values);
+
+          fragment.appendChild(row);
+        });
+        quotaBoardPrimaryDetailsList.appendChild(fragment);
       }
 
       function getQuotaBadgeTone(remaining) {
@@ -4712,6 +4836,7 @@ export function renderHtml() {
             ),
           );
         });
+        renderPrimaryQuotaDetails(summary.primary);
       }
 
       function renderOverviewStats(data) {

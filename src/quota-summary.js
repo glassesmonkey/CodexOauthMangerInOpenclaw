@@ -56,6 +56,7 @@ export function buildQuotaBoardSummary(rows) {
         profileId: row?.profileId || "-",
         displayLabel: row?.displayLabel || row?.profileId || "-",
         remainingPercent,
+        secondaryRemainingPercent: normalizeRemainingPercent(row?.secondary),
         sharePercent: 0,
       });
     }
