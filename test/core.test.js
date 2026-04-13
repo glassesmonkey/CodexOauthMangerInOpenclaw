@@ -2625,6 +2625,8 @@ test("renderHtml exposes accounts view toggle and compact toolbar structure", ()
   assert.match(html, /全局可用额度/);
   assert.match(html, /id="quotaBoardSecondaryValue"/);
   assert.match(html, /id="quotaBoardPrimaryValue"/);
+  assert.match(html, /id="quotaBoardSecondaryDetails"/);
+  assert.match(html, /查看可读账号明细/);
   assert.match(html, /id="quotaBoardPrimaryDetails"/);
   assert.match(html, /查看可用账号明细/);
   assert.match(html, /const PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT = 5;/);

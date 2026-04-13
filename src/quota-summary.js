@@ -65,6 +65,7 @@ export function buildQuotaBoardSummary(
         profileId: row?.profileId || "-",
         displayLabel: row?.displayLabel || row?.profileId || "-",
         remainingPercent,
+        primaryRemainingPercent: normalizeRemainingPercent(row?.primary),
         secondaryRemainingPercent: normalizeRemainingPercent(row?.secondary),
         sharePercent: 0,
       });
