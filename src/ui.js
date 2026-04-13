@@ -1,3 +1,4 @@
+import { PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT } from "./constants.js";
 import { buildQuotaBoardSummary } from "./quota-summary.js";
 
 function buildSvgDataUri(svg) {
@@ -712,6 +713,74 @@ export function renderHtml() {
 
       .quota-board-meta {
         margin-top: 2px;
+      }
+
+      .quota-board-details {
+        margin-top: 2px;
+        border-top: 1px dashed rgba(95, 68, 42, 0.14);
+        padding-top: 10px;
+      }
+
+      .quota-board-details summary {
+        cursor: pointer;
+        list-style: none;
+        color: var(--info);
+        font-size: 0.8rem;
+        font-weight: 600;
+      }
+
+      .quota-board-details summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .quota-board-details summary::before {
+        content: "▸";
+        display: inline-block;
+        margin-right: 6px;
+        transition: transform 140ms ease;
+      }
+
+      .quota-board-details[open] summary::before {
+        transform: rotate(90deg);
+      }
+
+      .quota-board-detail-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .quota-board-detail-row {
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.52);
+        border: 1px solid rgba(95, 68, 42, 0.1);
+      }
+
+      .quota-board-detail-label {
+        min-width: 0;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #3e2819;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .quota-board-detail-values {
+        display: inline-flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+
+      .quota-board-detail-empty {
+        color: var(--muted);
+        font-size: 0.78rem;
       }
 
       .meta-tag,
@@ -2309,6 +2378,10 @@ export function renderHtml() {
                 </div>
                 <div id="quotaBoardSecondaryBar" class="quota-board-bar" role="progressbar" aria-label="7d total remaining quota" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
                 <div id="quotaBoardSecondaryMeta" class="tag-row quota-board-meta"></div>
+                <details id="quotaBoardSecondaryDetails" class="quota-board-details">
+                  <summary id="quotaBoardSecondaryDetailsSummary">查看可读账号明细</summary>
+                  <div id="quotaBoardSecondaryDetailsList" class="quota-board-detail-list"></div>
+                </details>
               </section>
               <section class="quota-board-window">
                 <div class="quota-board-window-head">
@@ -2317,6 +2390,10 @@ export function renderHtml() {
                 </div>
                 <div id="quotaBoardPrimaryBar" class="quota-board-bar" role="progressbar" aria-label="5h total remaining quota" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
                 <div id="quotaBoardPrimaryMeta" class="tag-row quota-board-meta"></div>
+                <details id="quotaBoardPrimaryDetails" class="quota-board-details">
+                  <summary id="quotaBoardPrimaryDetailsSummary">查看可用账号明细</summary>
+                  <div id="quotaBoardPrimaryDetailsList" class="quota-board-detail-list"></div>
+                </details>
               </section>
             </div>
           </section>
@@ -2864,9 +2941,15 @@ export function renderHtml() {
       const quotaBoardSecondaryValue = document.getElementById("quotaBoardSecondaryValue");
       const quotaBoardSecondaryBar = document.getElementById("quotaBoardSecondaryBar");
       const quotaBoardSecondaryMeta = document.getElementById("quotaBoardSecondaryMeta");
+      const quotaBoardSecondaryDetails = document.getElementById("quotaBoardSecondaryDetails");
+      const quotaBoardSecondaryDetailsSummary = document.getElementById("quotaBoardSecondaryDetailsSummary");
+      const quotaBoardSecondaryDetailsList = document.getElementById("quotaBoardSecondaryDetailsList");
       const quotaBoardPrimaryValue = document.getElementById("quotaBoardPrimaryValue");
       const quotaBoardPrimaryBar = document.getElementById("quotaBoardPrimaryBar");
       const quotaBoardPrimaryMeta = document.getElementById("quotaBoardPrimaryMeta");
+      const quotaBoardPrimaryDetails = document.getElementById("quotaBoardPrimaryDetails");
+      const quotaBoardPrimaryDetailsSummary = document.getElementById("quotaBoardPrimaryDetailsSummary");
+      const quotaBoardPrimaryDetailsList = document.getElementById("quotaBoardPrimaryDetailsList");
       const profilesCountValue = document.getElementById("profilesCountValue");
       const depletedProfilesValue = document.getElementById("depletedProfilesValue");
       const availableProfilesValue = document.getElementById("availableProfilesValue");
@@ -2920,6 +3003,7 @@ export function renderHtml() {
       const tokenReminderModalDismissButton = document.getElementById("tokenReminderModalDismissButton");
       const tokenReminderModalFocusButton = document.getElementById("tokenReminderModalFocusButton");
 
+      const PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT = ${JSON.stringify(PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT)};
       ${buildQuotaBoardSummary.toString()}
 
       const TOOLBAR_ACTIONS = {
@@ -3332,6 +3416,93 @@ export function renderHtml() {
         node.className = "order-pill" + (tone ? " " + tone : "");
         node.textContent = label;
         return node;
+      }
+
+      function renderQuotaDetails(detailsNode, summaryNode, listNode, windowSummary, options = {}) {
+        if (!(listNode instanceof HTMLElement) || !(detailsNode instanceof HTMLElement)) {
+          return;
+        }
+
+        const title = typeof options.title === "string" && options.title ? options.title : "查看账号明细";
+        const emptyText = typeof options.emptyText === "string" && options.emptyText ? options.emptyText : "当前没有可展示的账号。";
+        const primaryLabel = typeof options.primaryLabel === "string" && options.primaryLabel ? options.primaryLabel : "5h";
+        const secondaryLabel = typeof options.secondaryLabel === "string" && options.secondaryLabel ? options.secondaryLabel : "7d";
+
+        listNode.innerHTML = "";
+        const count = Array.isArray(windowSummary?.segments) ? windowSummary.segments.length : 0;
+        if (summaryNode instanceof HTMLElement) {
+          summaryNode.textContent = count ? title + "（" + count + "）" : title;
+        }
+
+        if (!count) {
+          detailsNode.open = false;
+          const empty = document.createElement("div");
+          empty.className = "quota-board-detail-empty";
+          empty.textContent = emptyText;
+          listNode.appendChild(empty);
+          return;
+        }
+
+        const fragment = document.createDocumentFragment();
+        windowSummary.segments.forEach((segment) => {
+          const row = document.createElement("div");
+          row.className = "quota-board-detail-row";
+
+          const label = document.createElement("div");
+          label.className = "quota-board-detail-label";
+          label.textContent = segment.displayLabel || segment.profileId || "-";
+          label.title = segment.displayLabel || segment.profileId || "-";
+          row.appendChild(label);
+
+          const values = document.createElement("div");
+          values.className = "quota-board-detail-values";
+          values.appendChild(
+            createInfoPill(
+              primaryLabel + " " + (segment.primaryRemainingPercent == null ? "未知" : segment.primaryRemainingPercent + "%"),
+              getQuotaBadgeTone(segment.primaryRemainingPercent),
+            ),
+          );
+          values.appendChild(
+            createInfoPill(
+              secondaryLabel + " " + (segment.secondaryRemainingPercent == null ? "未知" : segment.secondaryRemainingPercent + "%"),
+              getQuotaBadgeTone(segment.secondaryRemainingPercent),
+            ),
+          );
+          row.appendChild(values);
+
+          fragment.appendChild(row);
+        });
+        listNode.appendChild(fragment);
+      }
+
+      function renderPrimaryQuotaDetails(windowSummary) {
+        renderQuotaDetails(
+          quotaBoardPrimaryDetails,
+          quotaBoardPrimaryDetailsSummary,
+          quotaBoardPrimaryDetailsList,
+          windowSummary,
+          {
+            title: "查看可用账号明细",
+            emptyText: "当前没有纳入 5h 总剩余的账号。",
+            primaryLabel: "5h",
+            secondaryLabel: "7d",
+          },
+        );
+      }
+
+      function renderSecondaryQuotaDetails(windowSummary) {
+        renderQuotaDetails(
+          quotaBoardSecondaryDetails,
+          quotaBoardSecondaryDetailsSummary,
+          quotaBoardSecondaryDetailsList,
+          windowSummary,
+          {
+            title: "查看可读账号明细",
+            emptyText: "当前没有纳入 7d 总剩余的账号。",
+            primaryLabel: "5h",
+            secondaryLabel: "7d",
+          },
+        );
       }
 
       function getQuotaBadgeTone(remaining) {
@@ -4658,7 +4829,7 @@ export function renderHtml() {
 
       function renderSpotlight(data) {
         const rows = Array.isArray(data?.rows) ? data.rows : [];
-        const summary = buildQuotaBoardSummary(rows);
+        const summary = buildQuotaBoardSummary(rows, PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT);
         const windows = [
           {
             title: "7d",
@@ -4678,13 +4849,13 @@ export function renderHtml() {
 
         quotaBoardTitle.textContent = "全局可用额度";
         quotaBoardDescription.textContent = rows.length
-          ? "总盘子只统计成功读到额度的账号，分母按可读账号数 × 100% 计算。"
+          ? "7d 总剩余按可读账号汇总；5h 总剩余只统计 7d 未耗尽且 5h 大于 5% 的账号。"
           : "等待读取账号额度后汇总 7d 与 5h 总剩余额度。";
 
         quotaBoardTags.innerHTML = "";
         quotaBoardTags.appendChild(createTag("账号数 " + summary.totalAccounts, "info"));
         quotaBoardTags.appendChild(createTag("7d 可读 " + summary.secondary.readableCount, summary.secondary.readableCount ? "ok" : "warn"));
-        quotaBoardTags.appendChild(createTag("5h 可读 " + summary.primary.readableCount, summary.primary.readableCount ? "ok" : "warn"));
+        quotaBoardTags.appendChild(createTag("5h 可用 " + summary.primary.readableCount, summary.primary.readableCount ? "ok" : "warn"));
         const nextReset = collectNextReset(data);
         quotaBoardTags.appendChild(
           createTag(
@@ -4699,7 +4870,7 @@ export function renderHtml() {
           metaNode.innerHTML = "";
           metaNode.appendChild(
             createInfoPill(
-              "可读 " + windowSummary.readableCount + "/" + summary.totalAccounts,
+              (title === "5h" ? "可用 " : "可读 ") + windowSummary.readableCount + "/" + summary.totalAccounts,
               windowSummary.readableCount ? "info" : "warn",
             ),
           );
@@ -4712,6 +4883,8 @@ export function renderHtml() {
             ),
           );
         });
+        renderSecondaryQuotaDetails(summary.secondary);
+        renderPrimaryQuotaDetails(summary.primary);
       }
 
       function renderOverviewStats(data) {

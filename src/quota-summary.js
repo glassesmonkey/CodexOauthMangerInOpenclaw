@@ -1,4 +1,15 @@
-export function buildQuotaBoardSummary(rows) {
+import { PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT } from "./constants.js";
+
+export function buildQuotaBoardSummary(
+  rows,
+  primaryRecommendationMinRemainingPercent = null,
+) {
+  const resolvedPrimaryRecommendationMinRemainingPercent =
+    typeof primaryRecommendationMinRemainingPercent === "number"
+    && Number.isFinite(primaryRecommendationMinRemainingPercent)
+      ? primaryRecommendationMinRemainingPercent
+      : PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT;
+
   function normalizeRemainingPercent(windowData) {
     return typeof windowData?.remainingPercent === "number" && Number.isFinite(windowData.remainingPercent)
       ? Math.max(0, Math.min(100, windowData.remainingPercent))
@@ -13,6 +24,19 @@ export function buildQuotaBoardSummary(rows) {
     return Number.isFinite(timestamp) ? timestamp : null;
   }
 
+  function shouldIncludePrimaryWindow(row, remainingPercent) {
+    if (row?.error || remainingPercent == null) {
+      return false;
+    }
+
+    const secondaryRemaining = normalizeRemainingPercent(row?.secondary);
+    if (secondaryRemaining == null || secondaryRemaining <= 0) {
+      return false;
+    }
+
+    return remainingPercent > resolvedPrimaryRecommendationMinRemainingPercent;
+  }
+
   function buildWindowSummary(items, windowKey, label) {
     const segments = [];
     let totalRemaining = 0;
@@ -22,6 +46,10 @@ export function buildQuotaBoardSummary(rows) {
     for (const row of Array.isArray(items) ? items : []) {
       const remainingPercent = normalizeRemainingPercent(row?.[windowKey]);
       if (remainingPercent == null) {
+        continue;
+      }
+
+      if (windowKey === "primary" && !shouldIncludePrimaryWindow(row, remainingPercent)) {
         continue;
       }
 
@@ -37,6 +65,8 @@ export function buildQuotaBoardSummary(rows) {
         profileId: row?.profileId || "-",
         displayLabel: row?.displayLabel || row?.profileId || "-",
         remainingPercent,
+        primaryRemainingPercent: normalizeRemainingPercent(row?.primary),
+        secondaryRemainingPercent: normalizeRemainingPercent(row?.secondary),
         sharePercent: 0,
       });
     }
