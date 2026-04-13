@@ -1,3 +1,4 @@
+import { PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT } from "./constants.js";
 import { buildQuotaBoardSummary } from "./quota-summary.js";
 
 function buildSvgDataUri(svg) {
@@ -4782,7 +4783,7 @@ export function renderHtml() {
 
       function renderSpotlight(data) {
         const rows = Array.isArray(data?.rows) ? data.rows : [];
-        const summary = buildQuotaBoardSummary(rows);
+        const summary = buildQuotaBoardSummary(rows, PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT);
         const windows = [
           {
             title: "7d",

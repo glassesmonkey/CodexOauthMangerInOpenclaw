@@ -1,6 +1,9 @@
 import { PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT } from "./constants.js";
 
-export function buildQuotaBoardSummary(rows) {
+export function buildQuotaBoardSummary(
+  rows,
+  primaryRecommendationMinRemainingPercent = PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT,
+) {
   function normalizeRemainingPercent(windowData) {
     return typeof windowData?.remainingPercent === "number" && Number.isFinite(windowData.remainingPercent)
       ? Math.max(0, Math.min(100, windowData.remainingPercent))
@@ -25,7 +28,7 @@ export function buildQuotaBoardSummary(rows) {
       return false;
     }
 
-    return remainingPercent > PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT;
+    return remainingPercent > primaryRecommendationMinRemainingPercent;
   }
 
   function buildWindowSummary(items, windowKey, label) {
