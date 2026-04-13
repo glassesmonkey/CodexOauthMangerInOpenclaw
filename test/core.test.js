@@ -2561,6 +2561,54 @@ test("buildQuotaBoardSummary excludes unreadable accounts from capacity", () => 
   assert.equal(summary.primary.segments.length, 1);
 });
 
+test("buildQuotaBoardSummary only includes actually usable accounts in 5h totals", () => {
+  const summary = buildQuotaBoardSummary([
+    {
+      profileId: "openai-codex:usable-a",
+      displayLabel: "usable-a@example.com",
+      secondary: { remainingPercent: 35, resetAt: 1_710_000_000 },
+      primary: { remainingPercent: 60, resetAt: 1_710_000_500 },
+    },
+    {
+      profileId: "openai-codex:usable-b",
+      displayLabel: "usable-b@example.com",
+      secondary: { remainingPercent: 8, resetAt: 1_710_000_100 },
+      primary: { remainingPercent: 6, resetAt: 1_710_000_600 },
+    },
+    {
+      profileId: "openai-codex:low-primary",
+      displayLabel: "low-primary@example.com",
+      secondary: { remainingPercent: 50, resetAt: 1_710_000_200 },
+      primary: { remainingPercent: 5, resetAt: 1_710_000_700 },
+    },
+    {
+      profileId: "openai-codex:empty-7d",
+      displayLabel: "empty-7d@example.com",
+      secondary: { remainingPercent: 0, resetAt: 1_710_000_300 },
+      primary: { remainingPercent: 90, resetAt: 1_710_000_800 },
+    },
+    {
+      profileId: "openai-codex:errored",
+      displayLabel: "errored@example.com",
+      secondary: { remainingPercent: 70, resetAt: 1_710_000_400 },
+      primary: { remainingPercent: 55, resetAt: 1_710_000_900 },
+      error: "Request timed out",
+    },
+  ]);
+
+  assert.equal(summary.totalAccounts, 5);
+  assert.equal(summary.secondary.totalCapacity, 500);
+  assert.equal(summary.secondary.totalRemaining, 163);
+  assert.equal(summary.secondary.readableCount, 5);
+  assert.equal(summary.primary.totalCapacity, 200);
+  assert.equal(summary.primary.totalRemaining, 66);
+  assert.equal(summary.primary.readableCount, 2);
+  assert.deepEqual(
+    summary.primary.segments.map((segment) => segment.profileId),
+    ["openai-codex:usable-a", "openai-codex:usable-b"],
+  );
+});
+
 test("renderHtml exposes accounts view toggle and compact toolbar structure", () => {
   const html = renderHtml();
 

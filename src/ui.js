@@ -4678,13 +4678,13 @@ export function renderHtml() {
 
         quotaBoardTitle.textContent = "全局可用额度";
         quotaBoardDescription.textContent = rows.length
-          ? "总盘子只统计成功读到额度的账号，分母按可读账号数 × 100% 计算。"
+          ? "7d 总剩余按可读账号汇总；5h 总剩余只统计 7d 未耗尽且 5h 大于 5% 的账号。"
           : "等待读取账号额度后汇总 7d 与 5h 总剩余额度。";
 
         quotaBoardTags.innerHTML = "";
         quotaBoardTags.appendChild(createTag("账号数 " + summary.totalAccounts, "info"));
         quotaBoardTags.appendChild(createTag("7d 可读 " + summary.secondary.readableCount, summary.secondary.readableCount ? "ok" : "warn"));
-        quotaBoardTags.appendChild(createTag("5h 可读 " + summary.primary.readableCount, summary.primary.readableCount ? "ok" : "warn"));
+        quotaBoardTags.appendChild(createTag("5h 可用 " + summary.primary.readableCount, summary.primary.readableCount ? "ok" : "warn"));
         const nextReset = collectNextReset(data);
         quotaBoardTags.appendChild(
           createTag(
