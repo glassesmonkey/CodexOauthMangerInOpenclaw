@@ -5,7 +5,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { applyOrderToAuthStore, deleteProfileFromAuthStore, readAuthStore, renameProfileInAuthStore, writeAuthStore } from "../src/auth-store.js";
+import { applyOrderToAuthStore, deleteProfileFromAuthStore, deleteProfilesFromAuthStore, readAuthStore, renameProfileInAuthStore, writeAuthStore } from "../src/auth-store.js";
 import { bundleContainsPlaintext, readEncryptedExportBundle } from "../src/auth-bundle.js";
 import { buildCodexAuthFile, readCodexAuthFile } from "../src/codex-cli-auth.js";
 import { buildStoredCodexCredential, loginWithCodex, resolveCredentialToken } from "../src/codex-auth.js";
@@ -20,6 +20,7 @@ import {
   cleanupDuplicateProfiles,
   commitImportBundle,
   deleteProfile,
+  deleteProfiles,
   exportBundle,
   linkCurrentCodexToProfile,
   loadDashboardState,
@@ -314,6 +315,46 @@ test("deleteProfileFromAuthStore removes related references", () => {
   assert.equal(updated.order, undefined);
   assert.equal(updated.lastGood, undefined);
   assert.equal(updated.usageStats, undefined);
+});
+
+test("deleteProfilesFromAuthStore removes multiple profiles and shared references", () => {
+  const store = {
+    version: 1,
+    profiles: {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+      },
+      "openai-codex:work": {
+        type: "oauth",
+        provider: "openai-codex",
+      },
+      "openai-codex:backup": {
+        type: "oauth",
+        provider: "openai-codex",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work", "openai-codex:backup"],
+    },
+    lastGood: {
+      "openai-codex": "openai-codex:work",
+    },
+    usageStats: {
+      "openai-codex:default": { lastUsed: 1 },
+      "openai-codex:work": { lastUsed: 2 },
+      "openai-codex:backup": { lastUsed: 3 },
+    },
+  };
+
+  const updated = deleteProfilesFromAuthStore(store, ["openai-codex:work", "openai-codex:backup"]);
+
+  assert.deepEqual(Object.keys(updated.profiles), ["openai-codex:default"]);
+  assert.deepEqual(updated.order["openai-codex"], ["openai-codex:default"]);
+  assert.equal(updated.lastGood, undefined);
+  assert.deepEqual(updated.usageStats, {
+    "openai-codex:default": { lastUsed: 1 },
+  });
 });
 
 test("buildStoredCodexCredential preserves Codex sidecar fields for export", () => {
@@ -1767,6 +1808,138 @@ test("deleteProfile only removes managed openai-codex runtime entries", async ()
     assert.deepEqual(runtimeRaw.order["openai-codex"], ["openai-codex:default"]);
     assert.equal(runtimeRaw.lastGood["openai-codex"], undefined);
     assert.equal(runtimeRaw.usageStats["openai-codex:work"], undefined);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("deleteProfiles removes multiple managed openai-codex runtime entries", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-delete-runtime-batch-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  fs.mkdirSync(agentDir, { recursive: true });
+
+  fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({
+    version: 2,
+    profiles: {
+      "openai:manual": {
+        type: "token",
+        provider: "openai",
+        token: "manual-token",
+      },
+      "openai-codex:default": {
+        type: "token",
+        provider: "openai-codex",
+        token: "default-token",
+      },
+      "openai-codex:work": {
+        type: "token",
+        provider: "openai-codex",
+        token: "work-token",
+      },
+      "openai-codex:backup": {
+        type: "token",
+        provider: "openai-codex",
+        token: "backup-token",
+      },
+    },
+    order: {
+      openai: ["openai:manual"],
+      "openai-codex": ["openai-codex:default", "openai-codex:work", "openai-codex:backup"],
+    },
+    lastGood: {
+      openai: "openai:manual",
+      "openai-codex": "openai-codex:backup",
+    },
+    usageStats: {
+      "openai:manual": {
+        totalRequests: 7,
+      },
+      "openai-codex:default": {
+        totalRequests: 1,
+      },
+      "openai-codex:work": {
+        totalRequests: 2,
+      },
+      "openai-codex:backup": {
+        totalRequests: 3,
+      },
+    },
+  }, null, 2));
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "token",
+        provider: "openai-codex",
+        token: "default-token",
+      },
+      "openai-codex:work": {
+        type: "token",
+        provider: "openai-codex",
+        token: "work-token",
+      },
+      "openai-codex:backup": {
+        type: "token",
+        provider: "openai-codex",
+        token: "backup-token",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work", "openai-codex:backup"],
+    },
+    lastGood: {
+      "openai-codex": "openai-codex:backup",
+    },
+    usageStats: {
+      "openai-codex:default": {
+        totalRequests: 1,
+      },
+      "openai-codex:work": {
+        totalRequests: 2,
+      },
+      "openai-codex:backup": {
+        totalRequests: 3,
+      },
+    },
+  });
+
+  try {
+    await deleteProfiles(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      ["openai-codex:work", "openai-codex:backup"],
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    const runtimeRaw = JSON.parse(fs.readFileSync(path.join(agentDir, "auth-profiles.json"), "utf8"));
+    assert.deepEqual(runtimeRaw.profiles["openai:manual"], {
+      type: "token",
+      provider: "openai",
+      token: "manual-token",
+    });
+    assert.deepEqual(runtimeRaw.order.openai, ["openai:manual"]);
+    assert.equal(runtimeRaw.lastGood.openai, "openai:manual");
+    assert.deepEqual(runtimeRaw.usageStats["openai:manual"], { totalRequests: 7 });
+
+    assert.equal(runtimeRaw.profiles["openai-codex:work"], undefined);
+    assert.equal(runtimeRaw.profiles["openai-codex:backup"], undefined);
+    assert.deepEqual(runtimeRaw.order["openai-codex"], ["openai-codex:default"]);
+    assert.equal(runtimeRaw.lastGood["openai-codex"], undefined);
+    assert.equal(runtimeRaw.usageStats["openai-codex:work"], undefined);
+    assert.equal(runtimeRaw.usageStats["openai-codex:backup"], undefined);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }

@@ -8,6 +8,7 @@ import {
   commitImportBundle,
   cleanupDuplicateProfiles,
   deleteProfile,
+  deleteProfiles,
   exportBundle,
   linkCurrentCodexToProfile,
   loadDashboardState,
@@ -220,6 +221,22 @@ export async function startDashboardServer(options = {}) {
           return;
         }
         sendJson(response, 200, await deleteProfile(options, profileId, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/delete-profiles") {
+        const body = await readBody(request);
+        const profileIds = Array.isArray(body.profileIds)
+          ? body.profileIds
+            .filter((entry) => typeof entry === "string")
+            .map((entry) => entry.trim())
+            .filter(Boolean)
+          : [];
+        if (profileIds.length === 0) {
+          sendJson(response, 400, { error: "profileIds is required." });
+          return;
+        }
+        sendJson(response, 200, await deleteProfiles(options, profileIds, createStateDeps(url, body)));
         return;
       }
 

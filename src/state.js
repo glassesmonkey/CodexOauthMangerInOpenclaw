@@ -8,7 +8,7 @@ import {
   buildLocalAuthStore,
   buildRuntimeAuthStore,
   computeEffectiveOrder,
-  deleteProfileFromAuthStore,
+  deleteProfilesFromAuthStore,
   getStoredOrder,
   listCodexProfiles,
   readAuthStore,
@@ -1806,7 +1806,11 @@ export async function renameProfile(options, profileId, nextProfileId, deps = {}
 }
 
 export async function deleteProfile(options, profileId, deps = {}) {
-  const nextStore = await updateAuthStore(options, (store) => deleteProfileFromAuthStore(store, profileId));
+  return await deleteProfiles(options, [profileId], deps);
+}
+
+export async function deleteProfiles(options, profileIds, deps = {}) {
+  const nextStore = await updateAuthStore(options, (store) => deleteProfilesFromAuthStore(store, profileIds));
   const selectedProfileId = getSelectedProfileId(nextStore);
   const selectedCredential = selectedProfileId ? nextStore.profiles[selectedProfileId] : null;
   await exportRuntimeFromLocal(options, nextStore, {

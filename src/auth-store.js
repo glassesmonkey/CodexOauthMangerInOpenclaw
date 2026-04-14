@@ -339,15 +339,35 @@ export function renameProfileInAuthStore(store, profileId, nextProfileId) {
 }
 
 export function deleteProfileFromAuthStore(store, profileId) {
-  if (!store.profiles[profileId]) {
-    throw new Error(`Profile "${profileId}" was not found in auth-profiles.json.`);
+  return deleteProfilesFromAuthStore(store, [profileId]);
+}
+
+export function deleteProfilesFromAuthStore(store, profileIds) {
+  const targets = Array.from(new Set(
+    Array.isArray(profileIds)
+      ? profileIds.filter((entry) => typeof entry === "string" && entry.trim())
+      : [],
+  ));
+
+  if (targets.length === 0) {
+    throw new Error("At least one profile id is required.");
   }
 
+  for (const profileId of targets) {
+    if (!store.profiles[profileId]) {
+      throw new Error(`Profile "${profileId}" was not found in auth-profiles.json.`);
+    }
+  }
+
+  const targetSet = new Set(targets);
   const next = structuredClone(store);
-  delete next.profiles[profileId];
+
+  for (const profileId of targets) {
+    delete next.profiles[profileId];
+  }
 
   if (next.order?.[CODEX_PROVIDER]) {
-    const filteredOrder = next.order[CODEX_PROVIDER].filter((entry) => entry !== profileId);
+    const filteredOrder = next.order[CODEX_PROVIDER].filter((entry) => !targetSet.has(entry));
     if (filteredOrder.length > 0) {
       next.order[CODEX_PROVIDER] = filteredOrder;
     } else {
@@ -358,15 +378,17 @@ export function deleteProfileFromAuthStore(store, profileId) {
     }
   }
 
-  if (next.lastGood?.[CODEX_PROVIDER] === profileId) {
+  if (next.lastGood?.[CODEX_PROVIDER] && targetSet.has(next.lastGood[CODEX_PROVIDER])) {
     delete next.lastGood[CODEX_PROVIDER];
     if (Object.keys(next.lastGood).length === 0) {
       next.lastGood = undefined;
     }
   }
 
-  if (next.usageStats?.[profileId]) {
-    delete next.usageStats[profileId];
+  if (next.usageStats) {
+    for (const profileId of targets) {
+      delete next.usageStats[profileId];
+    }
     if (Object.keys(next.usageStats).length === 0) {
       next.usageStats = undefined;
     }
