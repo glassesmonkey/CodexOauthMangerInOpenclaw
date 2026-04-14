@@ -6,6 +6,7 @@ import {
   applyOrder,
   bootstrapLocalStore,
   commitImportBundle,
+  cleanupDuplicateProfiles,
   deleteProfile,
   exportBundle,
   linkCurrentCodexToProfile,
@@ -157,6 +158,12 @@ export async function startDashboardServer(options = {}) {
       if (request.method === "POST" && url.pathname === "/api/import-bundle/commit") {
         const body = await readBody(request);
         sendJson(response, 200, await commitImportBundle(options, body, createStateDeps(url, body)));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/cleanup-duplicates") {
+        const body = await readBody(request);
+        sendJson(response, 200, await cleanupDuplicateProfiles(options, createStateDeps(url, body)));
         return;
       }
 

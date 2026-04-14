@@ -63,7 +63,12 @@ import {
   recommendProfileOrder,
 } from "./order.js";
 import { resolvePaths } from "./paths.js";
-import { clearAutoAuthProfileOverrides, readSessionStore, writeSessionStore } from "./session-store.js";
+import {
+  clearAutoAuthProfileOverrides,
+  readSessionStore,
+  summarizeAutoAuthProfileOverrides,
+  writeSessionStore,
+} from "./session-store.js";
 import { loadUsageRefreshBatch } from "./usage-refresh.js";
 import { dedupeStrings, isRecord, toErrorMessage } from "./utils.js";
 
@@ -95,6 +100,88 @@ function resolveExpiresAt(credential) {
 
 function normalizeEmail(email) {
   return typeof email === "string" && email.trim() ? email.trim().toLowerCase() : null;
+}
+
+function decodeJwtPayload(token) {
+  if (typeof token !== "string" || !token.trim()) {
+    return null;
+  }
+
+  const parts = token.split(".");
+  if (parts.length < 2 || !parts[1]) {
+    return null;
+  }
+
+  try {
+    const normalized = parts[1]
+      .replace(/-/g, "+")
+      .replace(/_/g, "/")
+      .padEnd(Math.ceil(parts[1].length / 4) * 4, "=");
+    const decoded = Buffer.from(normalized, "base64").toString("utf8");
+    const parsed = JSON.parse(decoded);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getJwtOpenAIAuthClaims(token) {
+  const payload = decodeJwtPayload(token);
+  const authClaims = payload?.["https://api.openai.com/auth"];
+  return isRecord(authClaims) ? authClaims : null;
+}
+
+function resolveCodexUserId(credential) {
+  const accessClaims = getJwtOpenAIAuthClaims(credential?.access);
+  if (typeof accessClaims?.chatgpt_user_id === "string" && accessClaims.chatgpt_user_id.trim()) {
+    return accessClaims.chatgpt_user_id.trim();
+  }
+
+  const idTokenClaims = getJwtOpenAIAuthClaims(credential?.codexAuth?.idToken);
+  if (typeof idTokenClaims?.chatgpt_user_id === "string" && idTokenClaims.chatgpt_user_id.trim()) {
+    return idTokenClaims.chatgpt_user_id.trim();
+  }
+
+  return null;
+}
+
+function involvesCodexProvider(left, right) {
+  return left?.provider === CODEX_PROVIDER || right?.provider === CODEX_PROVIDER;
+}
+
+function resolveCredentialIdentityKey(credential) {
+  if (!isRecord(credential)) {
+    return null;
+  }
+
+  if (credential.provider === CODEX_PROVIDER) {
+    const codexUserId = resolveCodexUserId(credential);
+    if (codexUserId) {
+      return `codex-user:${codexUserId}`;
+    }
+
+    const email = normalizeEmail(resolveEmail(credential));
+    if (email) {
+      return `email:${email}`;
+    }
+  }
+
+  const refresh = typeof credential.refresh === "string" && credential.refresh.trim()
+    ? credential.refresh.trim()
+    : null;
+  if (refresh) {
+    return `refresh:${refresh}`;
+  }
+
+  if (!involvesCodexProvider(credential, credential)) {
+    const accountId = resolveAccountId(credential);
+    if (accountId) {
+      return `account:${accountId}`;
+    }
+  }
+
+  const email = normalizeEmail(resolveEmail(credential));
+  return email ? `email:${email}` : null;
 }
 
 function sanitizeProfileSuffix(value) {
@@ -144,16 +231,26 @@ function credentialsShareIdentity(left, right) {
     return true;
   }
 
-  const leftAccountId = resolveAccountId(left);
-  const rightAccountId = resolveAccountId(right);
-  if (leftAccountId && rightAccountId) {
-    return leftAccountId === rightAccountId;
+  const leftCodexUserId = resolveCodexUserId(left);
+  const rightCodexUserId = resolveCodexUserId(right);
+  if (leftCodexUserId && rightCodexUserId) {
+    return leftCodexUserId === rightCodexUserId;
   }
 
   const leftEmail = normalizeEmail(resolveEmail(left));
   const rightEmail = normalizeEmail(resolveEmail(right));
   if (leftEmail && rightEmail) {
     return leftEmail === rightEmail;
+  }
+
+  if (involvesCodexProvider(left, right)) {
+    return false;
+  }
+
+  const leftAccountId = resolveAccountId(left);
+  const rightAccountId = resolveAccountId(right);
+  if (leftAccountId && rightAccountId) {
+    return leftAccountId === rightAccountId;
   }
 
   return false;
@@ -210,6 +307,150 @@ function buildMaintenanceSummary(store) {
     lastChangedProfileIds: Array.isArray(store?.maintenance?.lastChangedProfileIds)
       ? store.maintenance.lastChangedProfileIds.filter((entry) => typeof entry === "string" && entry.trim())
       : [],
+  };
+}
+
+function compareProfilePriority(leftProfileId, rightProfileId, orderIndexById) {
+  const leftOrderIndex = orderIndexById.get(leftProfileId) ?? Number.MAX_SAFE_INTEGER;
+  const rightOrderIndex = orderIndexById.get(rightProfileId) ?? Number.MAX_SAFE_INTEGER;
+  if (leftOrderIndex !== rightOrderIndex) {
+    return leftOrderIndex - rightOrderIndex;
+  }
+  return leftProfileId.localeCompare(rightProfileId);
+}
+
+function mergeDuplicateCredential(preferred, incoming) {
+  const preferredExpiresAt = resolveExpiresAt(preferred) ?? 0;
+  const incomingExpiresAt = resolveExpiresAt(incoming) ?? 0;
+  const primary = incomingExpiresAt > preferredExpiresAt ? incoming : preferred;
+  const secondary = primary === preferred ? incoming : preferred;
+  return {
+    ...secondary,
+    ...primary,
+    codexAuth: primary.codexAuth ?? secondary.codexAuth,
+  };
+}
+
+function remapAuthStoreReferences(store, idMap) {
+  const next = buildLocalAuthStore(store);
+
+  const remapProfileId = (profileId) => idMap.get(profileId) || profileId;
+
+  const currentOrder = getStoredOrder(next);
+  if (currentOrder.length > 0) {
+    next.order = next.order ?? {};
+    next.order[CODEX_PROVIDER] = dedupeStrings(
+      currentOrder
+        .map((profileId) => remapProfileId(profileId))
+        .filter((profileId) => next.profiles[profileId]),
+    );
+  }
+
+  if (next.lastGood?.[CODEX_PROVIDER]) {
+    const remappedLastGood = remapProfileId(next.lastGood[CODEX_PROVIDER]);
+    if (next.profiles[remappedLastGood]) {
+      next.lastGood[CODEX_PROVIDER] = remappedLastGood;
+    } else {
+      delete next.lastGood[CODEX_PROVIDER];
+      if (Object.keys(next.lastGood).length === 0) {
+        next.lastGood = undefined;
+      }
+    }
+  }
+
+  if (isRecord(next.usageStats)) {
+    const nextUsageStats = {};
+    for (const [profileId, stats] of Object.entries(next.usageStats)) {
+      const remappedProfileId = remapProfileId(profileId);
+      if (!next.profiles[remappedProfileId]) {
+        continue;
+      }
+      nextUsageStats[remappedProfileId] = stats;
+    }
+    next.usageStats = Object.keys(nextUsageStats).length > 0 ? nextUsageStats : undefined;
+  }
+
+  return next;
+}
+
+function collectDuplicateProfileGroups(store) {
+  const groups = new Map();
+
+  for (const entry of listCodexProfiles(store)) {
+    const identityKey = resolveCredentialIdentityKey(entry.credential);
+    if (!identityKey) {
+      continue;
+    }
+    const current = groups.get(identityKey) ?? [];
+    current.push(entry);
+    groups.set(identityKey, current);
+  }
+
+  return [...groups.entries()]
+    .filter(([, entries]) => entries.length > 1)
+    .map(([identityKey, entries]) => ({
+      identityKey,
+      profileIds: entries.map((entry) => entry.profileId),
+      entries,
+    }));
+}
+
+function buildDuplicateProfileSummary(store) {
+  const groups = collectDuplicateProfileGroups(store);
+  const duplicateProfileCount = groups.reduce((sum, group) => sum + Math.max(0, group.profileIds.length - 1), 0);
+  return {
+    groupCount: groups.length,
+    duplicateProfileCount,
+    groups: groups.map((group) => ({
+      identityKey: group.identityKey,
+      profileIds: group.profileIds,
+    })),
+  };
+}
+
+function normalizeDuplicateProfiles(store) {
+  const next = buildLocalAuthStore(store);
+  const preferredOrder = getPreferredOrder(next);
+  const orderIndexById = new Map(preferredOrder.map((profileId, index) => [profileId, index]));
+  const duplicateGroups = collectDuplicateProfileGroups(next);
+
+  if (duplicateGroups.length === 0) {
+    return {
+      store: next,
+      actions: [],
+      summary: buildDuplicateProfileSummary(next),
+    };
+  }
+
+  const idMap = new Map();
+  const actions = [];
+
+  for (const group of duplicateGroups) {
+    const sortedProfileIds = [...group.profileIds].sort((left, right) =>
+      compareProfilePriority(left, right, orderIndexById),
+    );
+    const canonicalProfileId = sortedProfileIds[0];
+
+    for (const duplicateProfileId of sortedProfileIds.slice(1)) {
+      next.profiles[canonicalProfileId] = mergeDuplicateCredential(
+        next.profiles[canonicalProfileId],
+        next.profiles[duplicateProfileId],
+      );
+      delete next.profiles[duplicateProfileId];
+      idMap.set(duplicateProfileId, canonicalProfileId);
+      actions.push({
+        type: "cleanup-duplicate",
+        sourceProfileId: duplicateProfileId,
+        targetProfileId: canonicalProfileId,
+      });
+    }
+  }
+
+  const remappedStore = remapAuthStoreReferences(next, idMap);
+  return {
+    store: remappedStore,
+    actions,
+    summary: buildDuplicateProfileSummary(remappedStore),
   };
 }
 
@@ -405,8 +646,9 @@ function createNotes() {
   return [
     "The project-local store is the canonical source of truth. OpenClaw auth-profiles.json, Hermes auth.json, and ~/.codex/auth.json are all generated projections.",
     "Quota refresh and token keepalive are separate flows: quota refresh reloads usage and ranking, while token keepalive only renews OAuth credentials.",
-    "Applying order updates the local store, the managed OpenClaw slice, and the managed Hermes slice. ~/.codex/auth.json is only rewritten when the selected account is Codex-compatible.",
-    "Setting a profile as current updates OpenClaw first, then Hermes if the account is OAuth-compatible, and finally Codex CLI if the account also carries a Codex id_token.",
+    "Applying order updates the local store, every managed OpenClaw runtime auth-profiles.json slice, and the managed Hermes slice. ~/.codex/auth.json is only rewritten when the selected account is Codex-compatible.",
+    "Runtime rebuild keeps conversation transcripts intact. It only clears auto-selected openai-codex session overrides so existing sessions can follow the refreshed order again.",
+    "Setting a profile as current updates every OpenClaw runtime auth-profiles.json first, then Hermes if the account is OAuth-compatible, and finally Codex CLI if the account also carries a Codex id_token.",
   ];
 }
 
@@ -474,6 +716,76 @@ function inspectOpenClawRuntime(context, localStore = null) {
     store,
     error,
     drift,
+  };
+}
+
+function inspectSessionOverrideTargets(context) {
+  const targets = context.sessionStoreTargetPaths.map((sessionStorePath, index) => {
+    const agentId = context.sessionStoreTargetAgentIds[index] || `agent-${index + 1}`;
+    const exists = fs.existsSync(sessionStorePath);
+    if (!exists) {
+      return {
+        agentId,
+        path: sessionStorePath,
+        exists: false,
+        error: null,
+        autoOverrideCount: 0,
+        mostRecentAutoOverride: null,
+      };
+    }
+
+    try {
+      const store = readSessionStore(sessionStorePath);
+      const summary = summarizeAutoAuthProfileOverrides(store, {
+        provider: CODEX_PROVIDER,
+      });
+      return {
+        agentId,
+        path: sessionStorePath,
+        exists: true,
+        error: null,
+        autoOverrideCount: summary.autoOverrideCount,
+        mostRecentAutoOverride: summary.mostRecentAutoOverride,
+      };
+    } catch (readError) {
+      return {
+        agentId,
+        path: sessionStorePath,
+        exists: true,
+        error: toErrorMessage(readError),
+        autoOverrideCount: 0,
+        mostRecentAutoOverride: null,
+      };
+    }
+  });
+
+  const affectedTargets = targets.filter((target) => target.autoOverrideCount > 0);
+  const mostRecentAutoOverride = affectedTargets
+    .flatMap((target) =>
+      target.mostRecentAutoOverride
+        ? [{
+          agentId: target.agentId,
+          path: target.path,
+          ...target.mostRecentAutoOverride,
+        }]
+        : []
+    )
+    .sort((left, right) => (right.updatedAt ?? -1) - (left.updatedAt ?? -1))[0] || null;
+
+  return {
+    targets,
+    totalAutoOverrideCount: affectedTargets.reduce((total, target) => total + target.autoOverrideCount, 0),
+    affectedAgentCount: affectedTargets.length,
+    mostRecentAutoOverride,
+  };
+}
+
+function buildSessionOverridesSummary(sessionOverrides) {
+  return {
+    totalAutoOverrideCount: sessionOverrides.totalAutoOverrideCount,
+    affectedAgentCount: sessionOverrides.affectedAgentCount,
+    mostRecentAutoOverride: sessionOverrides.mostRecentAutoOverride,
+    targets: sessionOverrides.targets,
   };
 }
 
@@ -561,7 +873,16 @@ function buildHermesSummary(context, hermesRuntime) {
   };
 }
 
-function buildDashboardWarnings(baseWarnings, context, codexRuntime, runtimeAuth, hermesRuntime, localStoreReady) {
+function buildDashboardWarnings(
+  baseWarnings,
+  context,
+  codexRuntime,
+  runtimeAuth,
+  hermesRuntime,
+  localStoreReady,
+  sessionOverrides,
+  duplicateSummary,
+) {
   const warnings = [...baseWarnings];
 
   if (!localStoreReady) {
@@ -592,6 +913,26 @@ function buildDashboardWarnings(baseWarnings, context, codexRuntime, runtimeAuth
     warnings.push("Current Hermes openai-codex provider state does not match any stored profile.");
   } else if (hermesRuntime?.ambiguous) {
     warnings.push("Current Hermes openai-codex provider state matches multiple stored profiles.");
+  }
+
+  if (sessionOverrides) {
+    for (const target of sessionOverrides.targets) {
+      if (target.error) {
+        warnings.push(`Failed to read OpenClaw session store for agent "${target.agentId}": ${target.error}`);
+      }
+    }
+
+    if (sessionOverrides.totalAutoOverrideCount > 0) {
+      warnings.push(
+        `OpenClaw session auto auth profile overrides can ignore the configured order: ${sessionOverrides.totalAutoOverrideCount} auto openai-codex overrides across ${sessionOverrides.affectedAgentCount} agents.`,
+      );
+    }
+  }
+
+  if (duplicateSummary?.duplicateProfileCount > 0) {
+    warnings.push(
+      `Local store contains ${duplicateSummary.duplicateProfileCount} duplicate openai-codex profiles across ${duplicateSummary.groupCount} identity group(s). Run duplicate cleanup before importing more accounts.`,
+    );
   }
 
   return warnings;
@@ -631,19 +972,47 @@ async function updateSessionStore(options, updater) {
   });
 }
 
-async function touchRuntimeSelection(options, preferredProfileId) {
+async function clearSessionOverrideTargets(options, preferredProfileId = null) {
   const context = resolvePaths(options);
+  const targets = [];
 
-  await updateOpenClawConfig(options, (config) => touchOpenClawConfig(config));
+  for (let index = 0; index < context.sessionStoreTargetPaths.length; index += 1) {
+    const sessionStorePath = context.sessionStoreTargetPaths[index];
+    const agentId = context.sessionStoreTargetAgentIds[index] || `agent-${index + 1}`;
+    if (!fs.existsSync(sessionStorePath)) {
+      targets.push({ agentId, path: sessionStorePath, exists: false, clearedCount: 0 });
+      continue;
+    }
 
-  if (context.sessionStoreExists && preferredProfileId) {
-    await updateSessionStore(options, (store) =>
-      clearAutoAuthProfileOverrides(store, {
+    const result = await withFileLock(sessionStorePath, async () => {
+      const store = readSessionStore(sessionStorePath);
+      const next = clearAutoAuthProfileOverrides(store, {
         provider: CODEX_PROVIDER,
         preferredProfileId,
-      }).store,
-    );
+      });
+      if (next.clearedCount > 0) {
+        writeSessionStore(sessionStorePath, next.store);
+      }
+      return next;
+    });
+
+    targets.push({
+      agentId,
+      path: sessionStorePath,
+      exists: true,
+      clearedCount: result.clearedCount,
+    });
   }
+
+  return {
+    targets,
+    totalClearedCount: targets.reduce((total, target) => total + target.clearedCount, 0),
+  };
+}
+
+async function touchRuntimeSelection(options, preferredProfileId) {
+  await updateOpenClawConfig(options, (config) => touchOpenClawConfig(config));
+  return await clearSessionOverrideTargets(options, preferredProfileId);
 }
 
 async function writeCodexSelection(options, credential) {
@@ -664,10 +1033,12 @@ async function writeHermesProjection(options, store, projectionOptions = {}) {
 
 async function writeRuntimeAuthProjection(options, store) {
   const context = resolvePaths(options);
-  fs.mkdirSync(path.dirname(context.runtimeAuthStorePath), { recursive: true });
-  await withFileLock(context.runtimeAuthStorePath, async () => {
-    writeRuntimeAuthStore(context.runtimeAuthStorePath, store);
-  });
+  for (const runtimeAuthTargetPath of context.runtimeAuthTargetPaths) {
+    fs.mkdirSync(path.dirname(runtimeAuthTargetPath), { recursive: true });
+    await withFileLock(runtimeAuthTargetPath, async () => {
+      writeRuntimeAuthStore(runtimeAuthTargetPath, store);
+    });
+  }
 }
 
 async function syncRuntimeConfig(options, store, configOptions = {}) {
@@ -707,10 +1078,18 @@ function mergeRefreshedCredential(existing, incoming) {
 }
 
 function assertMatchingProfileIdentity(profileId, existing, incoming) {
+  const existingCodexUserId = resolveCodexUserId(existing);
+  const incomingCodexUserId = resolveCodexUserId(incoming);
+  if (existingCodexUserId && incomingCodexUserId && existingCodexUserId !== incomingCodexUserId) {
+    throw new Error(`Logged-in account does not match profile "${profileId}".`);
+  }
+
+  if (!involvesCodexProvider(existing, incoming)) {
   const existingAccountId = resolveAccountId(existing);
   const incomingAccountId = resolveAccountId(incoming);
   if (existingAccountId && incomingAccountId && existingAccountId !== incomingAccountId) {
     throw new Error(`Logged-in account does not match profile "${profileId}".`);
+  }
   }
 
   const existingEmail = normalizeEmail(resolveEmail(existing));
@@ -721,16 +1100,14 @@ function assertMatchingProfileIdentity(profileId, existing, incoming) {
 }
 
 function credentialHasSameIdentity(left, right) {
-  const leftAccountId = resolveAccountId(left);
-  const rightAccountId = resolveAccountId(right);
-  if (leftAccountId && rightAccountId) {
-    return leftAccountId === rightAccountId;
+  if (exactRefreshMatch(left, right)) {
+    return true;
   }
 
-  const leftEmail = normalizeEmail(resolveEmail(left));
-  const rightEmail = normalizeEmail(resolveEmail(right));
-  if (leftEmail && rightEmail) {
-    return leftEmail === rightEmail;
+  const leftIdentityKey = resolveCredentialIdentityKey(left);
+  const rightIdentityKey = resolveCredentialIdentityKey(right);
+  if (leftIdentityKey && rightIdentityKey) {
+    return leftIdentityKey === rightIdentityKey;
   }
 
   return false;
@@ -742,21 +1119,16 @@ function exactRefreshMatch(left, right) {
   return Boolean(leftRefresh) && leftRefresh === rightRefresh;
 }
 
-function shouldMatchImportByAccountId(existingCredential, incomingCredential) {
-  const involvesCodex =
-    existingCredential?.provider === CODEX_PROVIDER
-    || incomingCredential?.provider === CODEX_PROVIDER;
+function exactCodexUserMatch(left, right) {
+  const leftUserId = resolveCodexUserId(left);
+  const rightUserId = resolveCodexUserId(right);
+  return Boolean(leftUserId) && Boolean(rightUserId) && leftUserId === rightUserId;
+}
 
-  if (!involvesCodex) {
-    return true;
-  }
-
-  const existingRefresh = typeof existingCredential?.refresh === "string" ? existingCredential.refresh.trim() : "";
-  const incomingRefresh = typeof incomingCredential?.refresh === "string" ? incomingCredential.refresh.trim() : "";
-
-  // Codex exports can contain multiple profiles under one accountId.
-  // When refresh tokens differ, each profile should stay independent.
-  return !existingRefresh && !incomingRefresh;
+function exactEmailMatch(left, right) {
+  const leftEmail = normalizeEmail(resolveEmail(left));
+  const rightEmail = normalizeEmail(resolveEmail(right));
+  return Boolean(leftEmail) && Boolean(rightEmail) && leftEmail === rightEmail;
 }
 
 function resolveImportTargetProfileId(localStore, incomingProfileId, incomingCredential) {
@@ -773,29 +1145,15 @@ function resolveImportTargetProfileId(localStore, incomingProfileId, incomingCre
     return refreshMatches[0];
   }
 
-  const accountMatches = profiles
-    .filter(([, credential]) => {
-      if (!shouldMatchImportByAccountId(credential, incomingCredential)) {
-        return false;
-      }
-      const existingAccountId = resolveAccountId(credential);
-      const incomingAccountId = resolveAccountId(incomingCredential);
-      return Boolean(existingAccountId) && Boolean(incomingAccountId) && existingAccountId === incomingAccountId;
-    })
+  const userMatches = profiles
+    .filter(([, credential]) => exactCodexUserMatch(credential, incomingCredential))
     .map(([profileId]) => profileId);
-  if (accountMatches.length === 1) {
-    return accountMatches[0];
+  if (userMatches.length === 1) {
+    return userMatches[0];
   }
 
   const emailMatches = profiles
-    .filter(([, credential]) => {
-      if (!shouldMatchImportByAccountId(credential, incomingCredential)) {
-        return false;
-      }
-      const existingEmail = normalizeEmail(resolveEmail(credential));
-      const incomingEmail = normalizeEmail(resolveEmail(incomingCredential));
-      return Boolean(existingEmail) && Boolean(incomingEmail) && existingEmail === incomingEmail;
-    })
+    .filter(([, credential]) => exactEmailMatch(credential, incomingCredential))
     .map(([profileId]) => profileId);
   if (emailMatches.length === 1) {
     return emailMatches[0];
@@ -830,14 +1188,16 @@ function summarizeImportActions(actions) {
     update: 0,
     skip: 0,
     "renamed-import": 0,
+    "cleanup-duplicate": 0,
   });
 }
 
 function previewBundleImport(localStore, importedStore) {
-  const next = buildLocalAuthStore(localStore);
+  const normalizedLocal = normalizeDuplicateProfiles(localStore);
+  const next = buildLocalAuthStore(normalizedLocal.store);
   const existingIds = new Set(Object.keys(next.profiles));
   const idMap = new Map();
-  const actions = [];
+  const actions = [...normalizedLocal.actions];
   const importedOrder = getPreferredOrder(importedStore);
 
   for (const [incomingProfileId, incomingCredential] of Object.entries(importedStore.profiles)) {
@@ -995,6 +1355,7 @@ export async function loadDashboardState(options = {}, deps = {}) {
   const configProfileIds = getConfigCodexProfiles(config);
   const localStoreReady = context.localAuthStoreExists;
   const authStore = localStoreReady ? readLocalAuthStore(context) : buildLocalAuthStore({});
+  const duplicateSummary = buildDuplicateProfileSummary(authStore);
   const profiles = listCodexProfiles(authStore);
   const runtimeProfileIds = profiles.map((entry) => entry.profileId);
   const currentEffectiveOrder = computeEffectiveOrder(authStore, configOrder);
@@ -1048,6 +1409,7 @@ export async function loadDashboardState(options = {}, deps = {}) {
   const finalProfiles = listCodexProfiles(authStore);
   const selectedProfileId = getSelectedProfileId(authStore, configOrder);
   const runtimeAuth = inspectOpenClawRuntime(context, localStoreReady ? authStore : null);
+  const sessionOverrides = inspectSessionOverrideTargets(context);
   const codexRuntime = inspectCodexAuthFile(context, finalProfiles);
   const hermesRuntime = inspectHermesAuthFile(context, localStoreReady ? authStore : null, {
     preferredOrder: currentEffectiveOrder,
@@ -1125,6 +1487,8 @@ export async function loadDashboardState(options = {}, deps = {}) {
     runtimeAuth,
     hermesRuntime,
     localStoreReady,
+    sessionOverrides,
+    duplicateSummary,
   );
 
   return {
@@ -1135,7 +1499,9 @@ export async function loadDashboardState(options = {}, deps = {}) {
       path: context.localAuthStorePath,
     },
     maintenance: buildMaintenanceSummary(authStore),
+    duplicateProfiles: duplicateSummary,
     runtimeAuth: buildOpenClawRuntimeSummary(context, runtimeAuth),
+    sessionOverrides: buildSessionOverridesSummary(sessionOverrides),
     codexAuth: buildCodexSummary(context, codexRuntime, {
       openClawSelectedProfileId: selectedProfileId,
     }),
@@ -1168,6 +1534,7 @@ export async function loadDashboardState(options = {}, deps = {}) {
       canRebuildRuntime: localStoreReady,
       canAbsorbRuntime: localStoreReady && context.runtimeAuthStoreExists,
       canAbsorbHermes: localStoreReady && context.hermesAuthExists,
+      canCleanupDuplicates: localStoreReady && duplicateSummary.duplicateProfileCount > 0,
     },
   };
 }
@@ -1604,6 +1971,40 @@ export async function commitImportBundle(options, request = {}, deps = {}) {
   });
 
   return await loadDashboardState(options, deps);
+}
+
+export async function cleanupDuplicateProfiles(options, deps = {}) {
+  const context = resolvePaths(options);
+  ensureLocalStoreInitialized(context);
+
+  const currentStore = readLocalAuthStore(context);
+  const normalized = normalizeDuplicateProfiles(currentStore);
+
+  if (normalized.actions.length === 0) {
+    return {
+      summary: normalized.summary,
+      actions: normalized.actions,
+      state: await loadDashboardState(options, deps),
+    };
+  }
+
+  fs.mkdirSync(path.dirname(context.localAuthStorePath), { recursive: true });
+  await withFileLock(context.localAuthStorePath, async () => {
+    writeAuthStore(context.localAuthStorePath, normalized.store);
+  });
+
+  const selectedProfileId = getSelectedProfileId(normalized.store);
+  const selectedCredential = selectedProfileId ? normalized.store.profiles[selectedProfileId] : null;
+  await exportRuntimeFromLocal(options, normalized.store, {
+    preferredProfileId: selectedProfileId,
+    codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
+  });
+
+  return {
+    summary: normalized.summary,
+    actions: normalized.actions,
+    state: await loadDashboardState(options, deps),
+  };
 }
 
 export async function saveLoggedInProfile(options, profileId, credentials, saveOptions = {}) {

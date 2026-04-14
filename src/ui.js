@@ -957,6 +957,10 @@ export function renderHtml() {
         word-break: break-all;
       }
 
+      .snapshot-value[data-multiline="true"] {
+        white-space: pre-wrap;
+      }
+
       .flash-banner {
         margin-top: 16px;
         padding: 13px 16px;
@@ -2322,6 +2326,10 @@ export function renderHtml() {
                       <span class="toolbar-menu-button-title">重建运行文件</span>
                       <span class="toolbar-menu-button-copy">按本地号池重写 OpenClaw、Hermes 以及兼容的 Codex 运行投影</span>
                     </button>
+                    <button id="cleanupDuplicatesButton" class="toolbar-menu-button" type="button" data-toolbar-action="cleanupDuplicates">
+                      <span class="toolbar-menu-button-title">清理重复账号</span>
+                      <span class="toolbar-menu-button-copy">按同一 OpenAI 用户自动合并重复 profile，并重建运行投影</span>
+                    </button>
                     <button id="absorbRuntimeButton" class="toolbar-menu-button" type="button" data-toolbar-action="absorb">
                       <span class="toolbar-menu-button-title">吸收运行数据</span>
                       <span class="toolbar-menu-button-copy">把当前 OpenClaw runtime 状态显式吸收到本地号池</span>
@@ -2701,8 +2709,16 @@ export function renderHtml() {
                     <div id="authValue" class="snapshot-value">-</div>
                   </div>
                   <div class="snapshot-item">
-                    <div class="stat-label">OpenClaw auth 位置</div>
+                    <div class="stat-label">主读取 OpenClaw auth</div>
                     <div id="runtimeAuthValue" class="snapshot-value">-</div>
+                  </div>
+                  <div class="snapshot-item">
+                    <div class="stat-label">同步到的 OpenClaw auth</div>
+                    <div id="runtimeAuthTargetsValue" class="snapshot-value" data-multiline="true">-</div>
+                  </div>
+                  <div class="snapshot-item">
+                    <div class="stat-label">自动会话覆盖</div>
+                    <div id="sessionOverridesValue" class="snapshot-value" data-multiline="true">-</div>
                   </div>
                   <div class="snapshot-item">
                     <div class="stat-label">Codex auth 位置</div>
@@ -2902,6 +2918,7 @@ export function renderHtml() {
       const importPrimaryButton = document.getElementById("importPrimaryButton");
       const syncButton = document.getElementById("syncButton");
       const rebuildRuntimeButton = document.getElementById("rebuildRuntimeButton");
+      const cleanupDuplicatesButton = document.getElementById("cleanupDuplicatesButton");
       const absorbRuntimeButton = document.getElementById("absorbRuntimeButton");
       const exportButton = document.getElementById("exportButton");
       const importButton = document.getElementById("importButton");
@@ -2958,6 +2975,8 @@ export function renderHtml() {
       const agentValue = document.getElementById("agentValue");
       const authValue = document.getElementById("authValue");
       const runtimeAuthValue = document.getElementById("runtimeAuthValue");
+      const runtimeAuthTargetsValue = document.getElementById("runtimeAuthTargetsValue");
+      const sessionOverridesValue = document.getElementById("sessionOverridesValue");
       const codexValue = document.getElementById("codexValue");
       const hermesValue = document.getElementById("hermesValue");
       const configValue = document.getElementById("configValue");
@@ -3009,9 +3028,9 @@ export function renderHtml() {
       const TOOLBAR_ACTIONS = {
         refresh: {
           label: "刷新额度",
-          description: "重新拉取额度、读取当前状态，并重算推荐顺序。",
+          description: "重新拉取额度、读取当前状态，并重算推荐顺序；手动刷新时若发现重复账号，会提示是否清理。",
           mutates: "不会刷新 token，只会重新读取状态与额度",
-          safe: "不会切换当前账号，也不会写回配置",
+          safe: "只有你确认后才会执行重复账号清理",
         },
         apply: {
           label: "应用推荐",
@@ -3046,8 +3065,14 @@ export function renderHtml() {
         rebuild: {
           label: "重建运行文件",
           description: "按本地号池重建 OpenClaw、Hermes 和兼容的 Codex 运行投影。",
-          mutates: "会更新 auth-profiles.json、Hermes auth.json，并在兼容时重写 ~/.codex/auth.json",
+          mutates: "会更新所有 agent 的 auth-profiles.json、清理自动会话覆盖、更新 Hermes auth.json，并在兼容时重写 ~/.codex/auth.json",
           safe: "不会改动本地号池内容",
+        },
+        cleanupDuplicates: {
+          label: "清理重复账号",
+          description: "按同一 OpenAI 用户合并重复 profile，修正导入历史留下的重复账号。",
+          mutates: "会更新本地号池、重写顺序与引用，并刷新 OpenClaw、Hermes 和兼容的 Codex 投影",
+          safe: "不会把同 team 的不同用户错误合并成一个账号",
         },
         absorb: {
           label: "吸收运行数据",
@@ -3932,7 +3957,7 @@ export function renderHtml() {
             scheduleQuotaRefresh();
             return;
           }
-          void refreshState("额度自动刷新完成");
+          void refreshState({ okMessage: "额度自动刷新完成" });
         }, appState.quotaRefreshIntervalSeconds * 1000);
       }
 
@@ -4043,6 +4068,7 @@ export function renderHtml() {
         setToolbarButtonText(importPrimaryButton, "import");
         setToolbarButtonText(syncButton, "sync");
         setToolbarButtonText(rebuildRuntimeButton, "rebuild");
+        setToolbarButtonText(cleanupDuplicatesButton, "cleanupDuplicates");
         setToolbarButtonText(absorbRuntimeButton, "absorb");
         setToolbarButtonText(exportButton, "export");
         setToolbarButtonText(importButton, "import");
@@ -4067,6 +4093,7 @@ export function renderHtml() {
         importPrimaryButton.disabled = disabled;
         syncButton.disabled = disabled || !storeReady;
         rebuildRuntimeButton.disabled = disabled || !storeReady;
+        cleanupDuplicatesButton.disabled = disabled || !storeReady || !appState.data?.actions?.canCleanupDuplicates;
         absorbRuntimeButton.disabled = disabled || !storeReady || !appState.data?.actions?.canAbsorbRuntime;
         exportButton.disabled = disabled || !storeReady;
         importButton.disabled = disabled;
@@ -4476,6 +4503,12 @@ export function renderHtml() {
         }
         if (note.includes("Failed to read Hermes auth.json")) {
           return "读取 Hermes auth.json 失败: " + note.split(": ").slice(1).join(": ");
+        }
+        if (note.includes("Failed to read OpenClaw session store for agent")) {
+          return "读取会话覆盖状态失败: " + note.split(": ").slice(1).join(": ");
+        }
+        if (note.includes("OpenClaw session auto auth profile overrides can ignore the configured order")) {
+          return "有会话被自动挑选的账号锁住了，可能暂时不按当前顺序走；重建运行文件后会自动清掉这些 auto override。";
         }
         return note;
       }
@@ -5229,15 +5262,69 @@ export function renderHtml() {
         profilesList.appendChild(fragment);
       }
 
+      function formatRuntimeAuthTargets(context) {
+        const targetAgentIds = Array.isArray(context?.runtimeAuthTargetAgentIds)
+          ? context.runtimeAuthTargetAgentIds.filter((entry) => typeof entry === "string" && entry)
+          : [];
+        const targetPaths = Array.isArray(context?.runtimeAuthTargetPaths)
+          ? context.runtimeAuthTargetPaths.filter((entry) => typeof entry === "string" && entry)
+          : [];
+
+        if (!targetPaths.length) {
+          return context?.runtimeAuthStorePath || "-";
+        }
+
+        const heading = targetAgentIds.length
+          ? "共 " + targetPaths.length + " 个 agent: " + targetAgentIds.join(", ")
+          : "共 " + targetPaths.length + " 个目标";
+
+        return [heading, ...targetPaths].join("\n");
+      }
+
+      function formatSessionOverrides(summary) {
+        const targets = Array.isArray(summary?.targets) ? summary.targets : [];
+        const total = Number.isFinite(summary?.totalAutoOverrideCount) ? summary.totalAutoOverrideCount : 0;
+        const affectedAgents = Number.isFinite(summary?.affectedAgentCount) ? summary.affectedAgentCount : 0;
+        const recent = summary?.mostRecentAutoOverride || null;
+        const withOverrides = targets
+          .filter((target) => Number.isFinite(target?.autoOverrideCount) && target.autoOverrideCount > 0)
+          .map((target) => target.agentId + " " + target.autoOverrideCount + " 个");
+
+        if (!targets.length) {
+          return "没有可检查的 session store";
+        }
+        if (total === 0) {
+          return "当前没有 openai-codex 的 auto override";
+        }
+
+        const lines = ["共 " + total + " 个 auto override，分布在 " + affectedAgents + " 个 agent"];
+        if (withOverrides.length) {
+          lines.push("按 agent: " + withOverrides.join(", "));
+        }
+        if (recent?.profileId) {
+          const timeText = recent.updatedAt
+            ? new Date(recent.updatedAt).toLocaleString("zh-CN", { hour12: false })
+            : "时间未知";
+          lines.push("最近: " + recent.agentId + " -> " + recent.profileId + " (" + timeText + ")");
+        }
+        return lines.join("\n");
+      }
+
       function render(data) {
         appState.data = data;
         applyTokenReminderSnapshot(buildTokenReminderSnapshotFromDashboardState(data));
         renderToolbarState(data);
         renderSpotlight(data);
         renderOverviewStats(data);
+        const runtimeAuthTargetsText = formatRuntimeAuthTargets(data.context);
+        const sessionOverridesText = formatSessionOverrides(data.sessionOverrides);
         agentValue.textContent = data.context.agentId;
         authValue.textContent = data.context.localAuthStorePath;
         runtimeAuthValue.textContent = data.context.runtimeAuthStorePath;
+        runtimeAuthTargetsValue.textContent = runtimeAuthTargetsText;
+        runtimeAuthTargetsValue.title = runtimeAuthTargetsText;
+        sessionOverridesValue.textContent = sessionOverridesText;
+        sessionOverridesValue.title = sessionOverridesText;
         codexValue.textContent = data.context.codexAuthPath;
         hermesValue.textContent = data.context.hermesAuthPath;
         configValue.textContent = data.context.configPath;
@@ -5321,20 +5408,75 @@ export function renderHtml() {
         }
       }
 
-      async function refreshState(okMessage = "额度刷新完成") {
+      function normalizeRefreshStateOptions(options = "额度刷新完成") {
+        if (typeof options === "string") {
+          return {
+            okMessage: options,
+            promptDuplicateCleanup: false,
+          };
+        }
+
+        return {
+          okMessage: typeof options?.okMessage === "string" && options.okMessage.trim()
+            ? options.okMessage.trim()
+            : "额度刷新完成",
+          promptDuplicateCleanup: Boolean(options?.promptDuplicateCleanup),
+        };
+      }
+
+      function joinStatusMessages(parts) {
+        return parts.filter((part) => typeof part === "string" && part.trim()).join("，");
+      }
+
+      async function maybeCleanupDuplicatesAfterRefresh(data, options) {
+        const duplicateCount = Number(data?.duplicateProfiles?.duplicateProfileCount || 0);
+        if (!duplicateCount || !options.promptDuplicateCleanup) {
+          return {
+            data,
+            message: "",
+            tone: "success",
+          };
+        }
+
+        const confirmed = window.confirm(
+          "检测到 " + duplicateCount + " 个重复 profile。现在合并并重建运行投影吗？",
+        );
+        if (!confirmed) {
+          return {
+            data,
+            message: "检测到 " + duplicateCount + " 个重复 profile，已跳过自动清理",
+            tone: "warn",
+          };
+        }
+
+        const result = await postJson("/api/cleanup-duplicates");
+        const nextState = result.state || await loadStateData();
+        render(nextState);
+        const mergedCount = Array.isArray(result.actions) ? result.actions.length : duplicateCount;
+        return {
+          data: nextState,
+          message: "检测到重复账号，已清理 " + mergedCount + " 个 profile",
+          tone: "success",
+        };
+      }
+
+      async function refreshState(options = "额度刷新完成") {
+        const refreshOptions = normalizeRefreshStateOptions(options);
+        const okMessage = refreshOptions.okMessage;
         clearQuotaRefreshTimer();
         setBusy(true, "正在刷新额度与排序...", "info");
         try {
           const data = await loadStateData();
           render(data);
-          let finalState = data;
+          const cleanupResult = await maybeCleanupDuplicatesAfterRefresh(data, refreshOptions);
+          let finalState = cleanupResult.data;
           let message = null;
-          let tone = "success";
+          let tone = cleanupResult.tone;
 
-          if (shouldAutoApplyRecommendedOrder(data)) {
+          if (shouldAutoApplyRecommendedOrder(finalState)) {
             setFlash("正在自动应用推荐顺序...", "info");
             const nextState = await postJson("/api/apply-order", {
-              order: data.recommendedOrder,
+              order: finalState.recommendedOrder,
               syncCodexSelection: isSharedCodexAutomationMode(),
             });
             finalState = nextState;
@@ -5352,9 +5494,11 @@ export function renderHtml() {
               skippedPrefix: fallbackMessage,
             });
           } else {
-            const blockedReason = data?.recommendedSelectionBlockedReason;
+            const blockedReason = finalState?.recommendedSelectionBlockedReason;
             message = blockedReason ? okMessage + "，" + blockedReason : okMessage;
-            tone = blockedReason ? "warn" : "success";
+            if (blockedReason) {
+              tone = "warn";
+            }
           }
 
           const codexSwitch = await maybeApplyIndependentCodexSwitch(finalState);
@@ -5362,7 +5506,8 @@ export function renderHtml() {
           if (codexSwitch.switched) {
             message = (message || okMessage) + "，Codex 已切到独立推荐账号，重启 Codex 后生效";
           }
-          setBusy(false, formatRefreshSuccessMessage(finalState, message || okMessage), tone);
+          const finalMessage = joinStatusMessages([cleanupResult.message, message || okMessage]);
+          setBusy(false, formatRefreshSuccessMessage(finalState, finalMessage), tone);
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
         } finally {
@@ -5521,6 +5666,31 @@ export function renderHtml() {
         }
       }
 
+      async function cleanupDuplicateProfiles() {
+        const duplicateCount = Number(appState.data?.duplicateProfiles?.duplicateProfileCount || 0);
+        if (!duplicateCount) {
+          setFlash("当前没有可清理的重复账号。", "ok");
+          return;
+        }
+
+        if (!window.confirm("将清理 " + duplicateCount + " 个重复 profile，并重建运行投影。确认继续？")) {
+          setFlash("已取消清理重复账号。", "warn");
+          return;
+        }
+
+        setBusy(true, "正在清理重复账号并重建运行投影...", "info");
+        try {
+          const result = await postJson("/api/cleanup-duplicates");
+          if (result.state) {
+            render(result.state);
+          }
+          const mergedCount = Array.isArray(result.actions) ? result.actions.length : duplicateCount;
+          setBusy(false, "重复账号已清理，合并 " + mergedCount + " 个 profile", "success");
+        } catch (error) {
+          setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        }
+      }
+
       async function absorbOpenClawRuntime() {
         setBusy(true, "正在吸收 OpenClaw runtime...", "info");
         try {
@@ -5572,6 +5742,7 @@ export function renderHtml() {
             "新增: " + String(summary.add || 0),
             "更新: " + String(summary.update || 0),
             "改名导入: " + String(summary["renamed-import"] || 0),
+            "清理重复: " + String(summary["cleanup-duplicate"] || 0),
             "跳过: " + String(summary.skip || 0),
           ];
           actions.slice(0, 12).forEach((action) => {
@@ -6074,7 +6245,7 @@ export function renderHtml() {
       });
 
       refreshButton.addEventListener("click", () => {
-        void refreshState();
+        void refreshState({ promptDuplicateCleanup: true });
       });
       tokenRefreshButton.addEventListener("click", () => {
         void refreshTokenSessions();
@@ -6095,6 +6266,10 @@ export function renderHtml() {
       rebuildRuntimeButton.addEventListener("click", () => {
         toolsMenu.removeAttribute("open");
         void rebuildRuntimeFiles();
+      });
+      cleanupDuplicatesButton.addEventListener("click", () => {
+        toolsMenu.removeAttribute("open");
+        void cleanupDuplicateProfiles();
       });
       absorbRuntimeButton.addEventListener("click", () => {
         toolsMenu.removeAttribute("open");

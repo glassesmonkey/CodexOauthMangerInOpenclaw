@@ -47,3 +47,41 @@ export function clearAutoAuthProfileOverrides(store, options = {}) {
 
   return { store: next, clearedCount };
 }
+
+export function summarizeAutoAuthProfileOverrides(store, options = {}) {
+  const provider = typeof options.provider === "string" && options.provider.trim()
+    ? options.provider.trim()
+    : CODEX_PROVIDER;
+  const providerPrefix = `${provider}:`;
+  const summary = {
+    provider,
+    autoOverrideCount: 0,
+    mostRecentAutoOverride: null,
+  };
+
+  for (const [sessionKey, value] of Object.entries(isRecord(store) ? store : {})) {
+    if (!isRecord(value)) {
+      continue;
+    }
+
+    const override = typeof value.authProfileOverride === "string" ? value.authProfileOverride.trim() : "";
+    if (!override || !override.startsWith(providerPrefix) || value.authProfileOverrideSource !== "auto") {
+      continue;
+    }
+
+    summary.autoOverrideCount += 1;
+    const updatedAt = typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt)
+      ? value.updatedAt
+      : null;
+
+    if (!summary.mostRecentAutoOverride || (updatedAt ?? -1) > (summary.mostRecentAutoOverride.updatedAt ?? -1)) {
+      summary.mostRecentAutoOverride = {
+        sessionKey,
+        profileId: override,
+        updatedAt,
+      };
+    }
+  }
+
+  return summary;
+}

@@ -20,6 +20,14 @@ function listAgentIdsFromFilesystem(stateDir) {
     .map((entry) => entry.name);
 }
 
+function listRuntimeAuthTargetAgentIds(stateDir, fallbackAgentId) {
+  const filesystemAgentIds = [...listAgentIdsFromFilesystem(stateDir)].sort((left, right) => left.localeCompare(right));
+  if (filesystemAgentIds.length > 0) {
+    return filesystemAgentIds;
+  }
+  return fallbackAgentId ? [fallbackAgentId] : [];
+}
+
 function listAgentIdsFromConfig(config) {
   const list = config?.agents?.list;
   if (!Array.isArray(list)) {
@@ -61,11 +69,26 @@ export function resolvePaths(options = {}) {
   const agentId =
     options.agent ||
     resolveDefaultAgentId(availableAgentIds, config);
-  const agentDir =
+  const explicitAgentDir =
     options.agentDir ||
     process.env.OPENCLAW_AGENT_DIR ||
     process.env.PI_CODING_AGENT_DIR ||
+    "";
+  const agentDir =
+    explicitAgentDir ||
     path.join(stateDir, "agents", agentId, "agent");
+  const runtimeAuthTargetAgentIds = explicitAgentDir
+    ? [agentId]
+    : listRuntimeAuthTargetAgentIds(stateDir, agentId);
+  const runtimeAuthTargetPaths = explicitAgentDir
+    ? [path.join(agentDir, "auth-profiles.json")]
+    : runtimeAuthTargetAgentIds.map((targetAgentId) =>
+      path.join(stateDir, "agents", targetAgentId, "agent", "auth-profiles.json")
+    );
+  const sessionStoreTargetAgentIds = [...runtimeAuthTargetAgentIds];
+  const sessionStoreTargetPaths = sessionStoreTargetAgentIds.map((targetAgentId) =>
+    path.join(stateDir, "agents", targetAgentId, "sessions", "sessions.json")
+  );
   const codexAuthPath =
     options.codexAuthPath ||
     process.env.CODEX_AUTH_PATH ||
@@ -94,6 +117,10 @@ export function resolvePaths(options = {}) {
     availableAgentIds,
     agentId,
     agentDir,
+    runtimeAuthTargetAgentIds,
+    runtimeAuthTargetPaths,
+    sessionStoreTargetAgentIds,
+    sessionStoreTargetPaths,
     codexAuthPath,
     hermesHome,
     hermesAuthPath,

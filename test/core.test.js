@@ -13,10 +13,11 @@ import { deleteProfileFromConfig, syncCodexIntoConfig, touchOpenClawConfig } fro
 import { extractHermesManagedPoolProfileIds, readHermesAuthFile } from "../src/hermes-auth.js";
 import { openBrowser, parseArgs } from "../src/index.js";
 import { buildConfigAudit, buildWarnings, recommendProfileOrder } from "../src/order.js";
-import { clearAutoAuthProfileOverrides, readSessionStore } from "../src/session-store.js";
+import { clearAutoAuthProfileOverrides, readSessionStore, summarizeAutoAuthProfileOverrides } from "../src/session-store.js";
 import {
   applyOrder,
   bootstrapLocalStore,
+  cleanupDuplicateProfiles,
   commitImportBundle,
   deleteProfile,
   exportBundle,
@@ -438,6 +439,36 @@ test("clearAutoAuthProfileOverrides keeps preferred and user-selected sessions",
   assert.equal(result.store["agent:main:three"].authProfileOverride, "openai-codex:manual");
 });
 
+test("summarizeAutoAuthProfileOverrides reports total and most recent auto override", () => {
+  const summary = summarizeAutoAuthProfileOverrides({
+    "agent:main:older": {
+      sessionId: "older",
+      updatedAt: 1,
+      authProfileOverride: "openai-codex:default",
+      authProfileOverrideSource: "auto",
+    },
+    "agent:main:newer": {
+      sessionId: "newer",
+      updatedAt: 5,
+      authProfileOverride: "openai-codex:work",
+      authProfileOverrideSource: "auto",
+    },
+    "agent:main:user": {
+      sessionId: "user",
+      updatedAt: 10,
+      authProfileOverride: "openai-codex:manual",
+      authProfileOverrideSource: "user",
+    },
+  });
+
+  assert.equal(summary.autoOverrideCount, 2);
+  assert.deepEqual(summary.mostRecentAutoOverride, {
+    sessionKey: "agent:main:newer",
+    profileId: "openai-codex:work",
+    updatedAt: 5,
+  });
+});
+
 test("applyOrder touches config and clears auto session overrides for older codex profiles", async () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-state-"));
   const localStateDir = path.join(stateDir, ".local");
@@ -567,6 +598,163 @@ test("applyOrder touches config and clears auto session overrides for older code
     assert.equal(sessions["agent:main:old"].authProfileOverride, undefined);
     assert.equal(sessions["agent:main:preferred"].authProfileOverride, "openai-codex:work");
     assert.equal(sessions["agent:main:user"].authProfileOverride, "openai-codex:default");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("applyOrder updates every runtime auth-profiles target and clears auto session overrides across synced agents", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-apply-all-agents-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const mainAgentDir = path.join(stateDir, "agents", "main", "agent");
+  const mainSessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  const qchatAgentDir = path.join(stateDir, "agents", "qchat-ts", "agent");
+  const qchatSessionsDir = path.join(stateDir, "agents", "qchat-ts", "sessions");
+  fs.mkdirSync(mainAgentDir, { recursive: true });
+  fs.mkdirSync(mainSessionsDir, { recursive: true });
+  fs.mkdirSync(qchatAgentDir, { recursive: true });
+  fs.mkdirSync(qchatSessionsDir, { recursive: true });
+  const qchatTranscriptPath = path.join(qchatSessionsDir, "session-qchat.jsonl");
+
+  const staleRuntime = {
+    version: 2,
+    profiles: {
+      "openai:manual": {
+        type: "token",
+        provider: "openai",
+        token: "manual-token",
+      },
+      "openai-codex:default": {
+        type: "token",
+        provider: "openai-codex",
+        token: "stale-default-token",
+      },
+      "openai-codex:work": {
+        type: "token",
+        provider: "openai-codex",
+        token: "stale-work-token",
+      },
+    },
+    order: {
+      openai: ["openai:manual"],
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+    lastGood: {
+      openai: "openai:manual",
+      "openai-codex": "openai-codex:default",
+    },
+  };
+
+  fs.writeFileSync(path.join(mainAgentDir, "auth-profiles.json"), JSON.stringify({
+    ...staleRuntime,
+    preserveMe: { agent: "main" },
+  }, null, 2));
+  fs.writeFileSync(path.join(qchatAgentDir, "auth-profiles.json"), JSON.stringify({
+    ...staleRuntime,
+    preserveMe: { agent: "qchat-ts" },
+  }, null, 2));
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "token",
+        provider: "openai-codex",
+        token: "default-token",
+      },
+      "openai-codex:work": {
+        type: "token",
+        provider: "openai-codex",
+        token: "work-token",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+  });
+
+  fs.writeFileSync(path.join(stateDir, "openclaw.json"), JSON.stringify({
+    auth: {
+      profiles: {
+        "openai-codex:default": { provider: "openai-codex", mode: "oauth" },
+        "openai-codex:work": { provider: "openai-codex", mode: "oauth" },
+      },
+      order: {
+        "openai-codex": ["openai-codex:default", "openai-codex:work"],
+      },
+    },
+  }, null, 2));
+
+  fs.writeFileSync(path.join(mainSessionsDir, "sessions.json"), JSON.stringify({
+    "agent:main:old": {
+      sessionId: "old",
+      updatedAt: 1,
+      authProfileOverride: "openai-codex:default",
+      authProfileOverrideSource: "auto",
+    },
+    "agent:main:preferred": {
+      sessionId: "preferred",
+      updatedAt: 1,
+      authProfileOverride: "openai-codex:work",
+      authProfileOverrideSource: "auto",
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(qchatSessionsDir, "sessions.json"), JSON.stringify({
+    "agent:qchat:auto": {
+      sessionId: "auto",
+      updatedAt: 1,
+      authProfileOverride: "openai-codex:default",
+      authProfileOverrideSource: "auto",
+    },
+    "agent:qchat:preferred": {
+      sessionId: "preferred",
+      updatedAt: 2,
+      authProfileOverride: "openai-codex:work",
+      authProfileOverrideSource: "auto",
+    },
+  }, null, 2));
+  fs.writeFileSync(qchatTranscriptPath, "{\"type\":\"message\",\"message\":\"keep me\"}\n");
+
+  try {
+    await applyOrder(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      ["openai-codex:work", "openai-codex:default"],
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 20, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 30, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    for (const [agentId, agentDir] of [["main", mainAgentDir], ["qchat-ts", qchatAgentDir]]) {
+      const runtimeRaw = JSON.parse(fs.readFileSync(path.join(agentDir, "auth-profiles.json"), "utf8"));
+      assert.deepEqual(runtimeRaw.preserveMe, { agent: agentId });
+      assert.deepEqual(runtimeRaw.order["openai-codex"], ["openai-codex:work", "openai-codex:default"]);
+      assert.equal(runtimeRaw.profiles["openai-codex:default"].token, "default-token");
+      assert.equal(runtimeRaw.profiles["openai-codex:work"].token, "work-token");
+      assert.deepEqual(runtimeRaw.profiles["openai:manual"], {
+        type: "token",
+        provider: "openai",
+        token: "manual-token",
+      });
+    }
+
+    const mainSessions = readSessionStore(path.join(mainSessionsDir, "sessions.json"));
+    assert.equal(mainSessions["agent:main:old"].authProfileOverride, undefined);
+    assert.equal(mainSessions["agent:main:preferred"].authProfileOverride, "openai-codex:work");
+
+    const qchatSessions = readSessionStore(path.join(qchatSessionsDir, "sessions.json"));
+    assert.equal(qchatSessions["agent:qchat:auto"].authProfileOverride, undefined);
+    assert.equal(qchatSessions["agent:qchat:preferred"].authProfileOverride, "openai-codex:work");
+    assert.equal(fs.readFileSync(qchatTranscriptPath, "utf8"), "{\"type\":\"message\",\"message\":\"keep me\"}\n");
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -1340,6 +1528,136 @@ test("rebuildRuntime rewrites Hermes managed pool first while preserving unmanag
   }
 });
 
+test("rebuildRuntime creates auth-profiles.json for every existing agent root", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-rebuild-all-agents-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const mainAgentDir = path.join(stateDir, "agents", "main", "agent");
+  const qchatRootDir = path.join(stateDir, "agents", "qchat-ts");
+  fs.mkdirSync(mainAgentDir, { recursive: true });
+  fs.mkdirSync(qchatRootDir, { recursive: true });
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": createOauthProfile({
+        access: "default-access",
+        refresh: "default-refresh",
+        accountId: "account-default",
+        email: "default@example.com",
+      }),
+      "openai-codex:work": createOauthProfile({
+        access: "work-access",
+        refresh: "work-refresh",
+        accountId: "account-work",
+        email: "work@example.com",
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:default", "openai-codex:work"],
+    },
+  });
+
+  try {
+    await rebuildRuntime(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    const qchatRuntimePath = path.join(qchatRootDir, "agent", "auth-profiles.json");
+    assert.equal(fs.existsSync(path.join(mainAgentDir, "auth-profiles.json")), true);
+    assert.equal(fs.existsSync(qchatRuntimePath), true);
+    assert.deepEqual(readAuthStore(qchatRuntimePath).order["openai-codex"], [
+      "openai-codex:default",
+      "openai-codex:work",
+    ]);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("explicit agentDir mode only clears auto session overrides for the targeted agent", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-explicit-agent-dir-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const mainAgentDir = path.join(stateDir, "agents", "main", "agent");
+  const mainSessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  const qchatAgentDir = path.join(stateDir, "agents", "qchat-ts", "agent");
+  const qchatSessionsDir = path.join(stateDir, "agents", "qchat-ts", "sessions");
+  fs.mkdirSync(mainAgentDir, { recursive: true });
+  fs.mkdirSync(mainSessionsDir, { recursive: true });
+  fs.mkdirSync(qchatAgentDir, { recursive: true });
+  fs.mkdirSync(qchatSessionsDir, { recursive: true });
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": createOauthProfile({
+        access: "default-access",
+        refresh: "default-refresh",
+        accountId: "account-default",
+        email: "default@example.com",
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:default"],
+    },
+  });
+
+  fs.writeFileSync(path.join(mainSessionsDir, "sessions.json"), JSON.stringify({
+    "agent:main:auto": {
+      sessionId: "main-auto",
+      updatedAt: 1,
+      authProfileOverride: "openai-codex:work",
+      authProfileOverrideSource: "auto",
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(qchatSessionsDir, "sessions.json"), JSON.stringify({
+    "agent:qchat:auto": {
+      sessionId: "qchat-auto",
+      updatedAt: 1,
+      authProfileOverride: "openai-codex:work",
+      authProfileOverrideSource: "auto",
+    },
+  }, null, 2));
+
+  try {
+    await rebuildRuntime(
+      { stateDir, localStateDir, agent: "main", agentDir: mainAgentDir, codexAuthPath },
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    const mainSessions = readSessionStore(path.join(mainSessionsDir, "sessions.json"));
+    const qchatSessions = readSessionStore(path.join(qchatSessionsDir, "sessions.json"));
+    assert.equal(mainSessions["agent:main:auto"].authProfileOverride, undefined);
+    assert.equal(qchatSessions["agent:qchat:auto"].authProfileOverride, "openai-codex:work");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("deleteProfile only removes managed openai-codex runtime entries", async () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-delete-runtime-scope-"));
   const localStateDir = path.join(stateDir, ".local");
@@ -1449,6 +1767,89 @@ test("deleteProfile only removes managed openai-codex runtime entries", async ()
     assert.deepEqual(runtimeRaw.order["openai-codex"], ["openai-codex:default"]);
     assert.equal(runtimeRaw.lastGood["openai-codex"], undefined);
     assert.equal(runtimeRaw.usageStats["openai-codex:work"], undefined);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("loadDashboardState exposes all runtime auth sync targets in context", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-state-targets-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const mainAgentDir = path.join(stateDir, "agents", "main", "agent");
+  const qchatAgentDir = path.join(stateDir, "agents", "qchat-ts", "agent");
+  const mainSessionsDir = path.join(stateDir, "agents", "main", "sessions");
+  const qchatSessionsDir = path.join(stateDir, "agents", "qchat-ts", "sessions");
+  fs.mkdirSync(mainAgentDir, { recursive: true });
+  fs.mkdirSync(qchatAgentDir, { recursive: true });
+  fs.mkdirSync(mainSessionsDir, { recursive: true });
+  fs.mkdirSync(qchatSessionsDir, { recursive: true });
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:default": {
+        type: "token",
+        provider: "openai-codex",
+        token: "default-token",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:default"],
+    },
+  });
+  fs.writeFileSync(path.join(stateDir, "openclaw.json"), JSON.stringify({}, null, 2));
+  fs.writeFileSync(path.join(mainSessionsDir, "sessions.json"), JSON.stringify({
+    "agent:main:auto": {
+      sessionId: "main-auto",
+      updatedAt: 1,
+      authProfileOverride: "openai-codex:default",
+      authProfileOverrideSource: "auto",
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(qchatSessionsDir, "sessions.json"), JSON.stringify({
+    "agent:qchat:auto": {
+      sessionId: "qchat-auto",
+      updatedAt: 5,
+      authProfileOverride: "openai-codex:default",
+      authProfileOverrideSource: "auto",
+    },
+  }, null, 2));
+
+  try {
+    const state = await loadDashboardState(
+      { stateDir, localStateDir, agent: "main" },
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          async json() {
+            return {
+              rate_limit: {
+                primary_window: { used_percent: 10, reset_at: 200, limit_window_seconds: 18000 },
+                secondary_window: { used_percent: 20, reset_at: 400, limit_window_seconds: 604800 },
+              },
+            };
+          },
+        }),
+      },
+    );
+
+    assert.equal(state.context.runtimeAuthStorePath, path.join(mainAgentDir, "auth-profiles.json"));
+    assert.deepEqual(state.context.runtimeAuthTargetAgentIds, ["main", "qchat-ts"]);
+    assert.deepEqual(state.context.runtimeAuthTargetPaths, [
+      path.join(mainAgentDir, "auth-profiles.json"),
+      path.join(qchatAgentDir, "auth-profiles.json"),
+    ]);
+    assert.deepEqual(state.context.sessionStoreTargetAgentIds, ["main", "qchat-ts"]);
+    assert.deepEqual(state.context.sessionStoreTargetPaths, [
+      path.join(mainSessionsDir, "sessions.json"),
+      path.join(qchatSessionsDir, "sessions.json"),
+    ]);
+    assert.equal(state.sessionOverrides.totalAutoOverrideCount, 2);
+    assert.equal(state.sessionOverrides.affectedAgentCount, 2);
+    assert.equal(state.sessionOverrides.mostRecentAutoOverride.agentId, "qchat-ts");
+    assert.equal(state.sessionOverrides.mostRecentAutoOverride.profileId, "openai-codex:default");
+    assert.ok(
+      state.warnings.some((warning) => warning.includes("OpenClaw session auto auth profile overrides can ignore the configured order")),
+    );
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -2621,6 +3022,9 @@ test("renderHtml exposes accounts view toggle and compact toolbar structure", ()
   assert.match(html, /更多工具/);
   assert.match(html, /id="toolbarHelpCard"/);
   assert.match(html, /id="refreshButton"[^>]*>刷新额度</);
+  assert.match(html, /void refreshState\(\{ promptDuplicateCleanup: true \}\);/);
+  assert.match(html, /void refreshState\(\{ okMessage: "额度自动刷新完成" \}\);/);
+  assert.match(html, /检测到 .* 个重复 profile。现在合并并重建运行投影吗？/);
   assert.match(html, /id="quotaBoardTitle"/);
   assert.match(html, /全局可用额度/);
   assert.match(html, /id="quotaBoardSecondaryValue"/);
@@ -2629,6 +3033,10 @@ test("renderHtml exposes accounts view toggle and compact toolbar structure", ()
   assert.match(html, /查看可读账号明细/);
   assert.match(html, /id="quotaBoardPrimaryDetails"/);
   assert.match(html, /查看可用账号明细/);
+  assert.match(html, /id="runtimeAuthTargetsValue"/);
+  assert.match(html, /同步到的 OpenClaw auth/);
+  assert.match(html, /id="sessionOverridesValue"/);
+  assert.match(html, /自动会话覆盖/);
   assert.match(html, /const PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT = 5;/);
   assert.doesNotMatch(html, /primaryRecommendationMinRemainingPercent = PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT/);
   assert.match(html, /id="tabTokenRefresh"/);
@@ -2976,7 +3384,15 @@ test("commitImportBundle keeps Codex profiles with same accountId but different 
       "openai-codex:shared-a": {
         type: "oauth",
         provider: "openai-codex",
-        access: "shared-access-a",
+        access: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "shared-account",
+            chatgpt_user_id: "shared-user-a",
+          },
+          "https://api.openai.com/profile": {
+            email: "shared-a@example.com",
+          },
+        }),
         refresh: "shared-refresh-a",
         expires: Date.now() + 60_000,
         accountId: "shared-account",
@@ -2990,7 +3406,15 @@ test("commitImportBundle keeps Codex profiles with same accountId but different 
       "openai-codex:shared-b": {
         type: "oauth",
         provider: "openai-codex",
-        access: "shared-access-b",
+        access: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "shared-account",
+            chatgpt_user_id: "shared-user-b",
+          },
+          "https://api.openai.com/profile": {
+            email: "shared-b@example.com",
+          },
+        }),
         refresh: "shared-refresh-b",
         expires: Date.now() + 60_000,
         accountId: "shared-account",
@@ -3004,7 +3428,15 @@ test("commitImportBundle keeps Codex profiles with same accountId but different 
       "openai-codex:solo": {
         type: "oauth",
         provider: "openai-codex",
-        access: "solo-access",
+        access: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "solo-account",
+            chatgpt_user_id: "solo-user",
+          },
+          "https://api.openai.com/profile": {
+            email: "solo@example.com",
+          },
+        }),
         refresh: "solo-refresh",
         expires: Date.now() + 60_000,
         accountId: "solo-account",
@@ -3052,7 +3484,15 @@ test("commitImportBundle keeps Codex profiles with same accountId but different 
         "openai-codex:shared-a": {
           type: "oauth",
           provider: "openai-codex",
-          access: "old-shared-access-a",
+          access: createJwt({
+            "https://api.openai.com/auth": {
+              chatgpt_account_id: "shared-account",
+              chatgpt_user_id: "shared-user-a",
+            },
+            "https://api.openai.com/profile": {
+              email: "old-shared-a@example.com",
+            },
+          }),
           refresh: "shared-refresh-a",
           expires: Date.now() + 30_000,
           accountId: "shared-account",
@@ -3101,6 +3541,208 @@ test("commitImportBundle keeps Codex profiles with same accountId but different 
     }
   } finally {
     fs.rmSync(sourceStateDir, { recursive: true, force: true });
+  }
+});
+
+test("previewImportBundle merges Codex profiles by chatgpt_user_id even when profile ids differ", async () => {
+  const targetStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-import-user-id-"));
+  const targetLocalStateDir = path.join(targetStateDir, ".local");
+  const targetCodexAuthPath = path.join(targetStateDir, ".codex", "auth.json");
+  const sourceStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-import-user-id-src-"));
+  const sourceLocalStateDir = path.join(sourceStateDir, ".local");
+  const sourceCodexAuthPath = path.join(sourceStateDir, ".codex", "auth.json");
+
+  writeLocalStore(targetStateDir, {
+    profiles: {
+      "openai-codex:fish1": createOauthProfile({
+        access: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "shared-account",
+            chatgpt_user_id: "user-1",
+          },
+          "https://api.openai.com/profile": {
+            email: "alex1@unfish.app",
+          },
+        }),
+        refresh: "refresh-local-user-1",
+        accountId: "shared-account",
+        email: "alex1@unfish.app",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "id-local-user-1",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:fish1"],
+    },
+  });
+
+  writeLocalStore(sourceStateDir, {
+    profiles: {
+      "openai-codex:alex1unfish": createOauthProfile({
+        access: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "shared-account",
+            chatgpt_user_id: "user-1",
+          },
+          "https://api.openai.com/profile": {
+            email: "alex1@unfish.app",
+          },
+        }),
+        refresh: "refresh-imported-user-1",
+        accountId: "shared-account",
+        email: "alex1@unfish.app",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "id-imported-user-1",
+          lastRefresh: "2026-04-03T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:alex1unfish"],
+    },
+  });
+
+  const usageFetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        rate_limit: {
+          primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+          secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+        },
+      };
+    },
+  });
+
+  try {
+    const exported = await exportBundle(
+      { stateDir: sourceStateDir, localStateDir: sourceLocalStateDir, agent: "main", codexAuthPath: sourceCodexAuthPath },
+      { passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    const preview = await previewImportBundle(
+      { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+      { bundle: exported.bundle, passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    assert.equal(preview.preview.summary.update, 1);
+    assert.equal(preview.preview.summary.add, 0);
+    assert.deepEqual(preview.preview.actions, [
+      {
+        type: "update",
+        sourceProfileId: "openai-codex:alex1unfish",
+        targetProfileId: "openai-codex:fish1",
+      },
+    ]);
+  } finally {
+    fs.rmSync(targetStateDir, { recursive: true, force: true });
+    fs.rmSync(sourceStateDir, { recursive: true, force: true });
+  }
+});
+
+test("cleanupDuplicateProfiles merges existing duplicate Codex profiles by user id and preserves references", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-cleanup-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:fish1": createOauthProfile({
+        access: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "shared-account",
+            chatgpt_user_id: "user-1",
+          },
+          "https://api.openai.com/profile": {
+            email: "alex1@unfish.app",
+          },
+        }),
+        refresh: "refresh-canonical",
+        accountId: "shared-account",
+        email: "alex1@unfish.app",
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "id-canonical",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:alex1unfish": createOauthProfile({
+        access: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "shared-account",
+            chatgpt_user_id: "user-1",
+          },
+          "https://api.openai.com/profile": {
+            email: "alex1@unfish.app",
+          },
+        }),
+        refresh: "refresh-duplicate",
+        accountId: "shared-account",
+        email: "alex1@unfish.app",
+        expires: Date.now() + 120_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "id-duplicate",
+          lastRefresh: "2026-04-03T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:fish2": createOauthProfile({
+        access: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "shared-account",
+            chatgpt_user_id: "user-2",
+          },
+          "https://api.openai.com/profile": {
+            email: "alex2@unfish.app",
+          },
+        }),
+        refresh: "refresh-user-2",
+        accountId: "shared-account",
+        email: "alex2@unfish.app",
+      }),
+    },
+    order: {
+      "openai-codex": [
+        "openai-codex:fish1",
+        "openai-codex:alex1unfish",
+        "openai-codex:fish2",
+      ],
+    },
+    lastGood: {
+      "openai-codex": "openai-codex:alex1unfish",
+    },
+    usageStats: {
+      "openai-codex:alex1unfish": {
+        primary: { remainingPercent: 80 },
+      },
+    },
+  });
+
+  try {
+    const result = await cleanupDuplicateProfiles(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {},
+    );
+
+    assert.equal(result.actions.length, 1);
+    assert.equal(result.actions[0].sourceProfileId, "openai-codex:alex1unfish");
+    assert.equal(result.actions[0].targetProfileId, "openai-codex:fish1");
+
+    const store = readAuthStore(path.join(localStateDir, "auth-store.json"));
+    assert.deepEqual(store.order["openai-codex"], ["openai-codex:fish1", "openai-codex:fish2"]);
+    assert.equal(store.lastGood["openai-codex"], "openai-codex:fish1");
+    assert.equal(store.usageStats["openai-codex:fish1"].primary.remainingPercent, 80);
+    assert.equal(store.profiles["openai-codex:alex1unfish"], undefined);
+    assert.equal(store.profiles["openai-codex:fish1"].refresh, "refresh-duplicate");
+    assert.equal(store.profiles["openai-codex:fish2"].email, "alex2@unfish.app");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
   }
 });
 
