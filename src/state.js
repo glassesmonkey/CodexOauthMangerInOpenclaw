@@ -1077,6 +1077,80 @@ function mergeRefreshedCredential(existing, incoming) {
   };
 }
 
+function mergeDefinedRecord(primary, secondary) {
+  const primaryRecord = isRecord(primary) ? primary : null;
+  const secondaryRecord = isRecord(secondary) ? secondary : null;
+
+  if (!primaryRecord && !secondaryRecord) {
+    return primary ?? secondary;
+  }
+
+  const merged = {};
+  const keys = new Set([
+    ...Object.keys(secondaryRecord ?? {}),
+    ...Object.keys(primaryRecord ?? {}),
+  ]);
+
+  for (const key of keys) {
+    const primaryValue = primaryRecord?.[key];
+    if (primaryValue !== undefined) {
+      merged[key] = primaryValue;
+      continue;
+    }
+    const secondaryValue = secondaryRecord?.[key];
+    if (secondaryValue !== undefined) {
+      merged[key] = secondaryValue;
+    }
+  }
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function mergeCredentialByPriority(primary, secondary) {
+  const primaryCredential = isRecord(primary) ? primary : {};
+  const secondaryCredential = isRecord(secondary) ? secondary : {};
+  const merged = {};
+  const keys = new Set([
+    ...Object.keys(secondaryCredential),
+    ...Object.keys(primaryCredential),
+  ]);
+
+  for (const key of keys) {
+    if (key === "codexAuth" || key === "metadata") {
+      const nested = mergeDefinedRecord(primaryCredential[key], secondaryCredential[key]);
+      if (nested !== undefined) {
+        merged[key] = nested;
+      }
+      continue;
+    }
+
+    const primaryValue = primaryCredential[key];
+    if (primaryValue !== undefined) {
+      merged[key] = primaryValue;
+      continue;
+    }
+
+    const secondaryValue = secondaryCredential[key];
+    if (secondaryValue !== undefined) {
+      merged[key] = secondaryValue;
+    }
+  }
+
+  return merged;
+}
+
+function mergeImportedCredential(existing, incoming) {
+  const existingExpiresAt = resolveExpiresAt(existing);
+  const incomingExpiresAt = resolveExpiresAt(incoming);
+  const preferIncoming = existingExpiresAt !== null
+    && incomingExpiresAt !== null
+    && incomingExpiresAt > existingExpiresAt;
+
+  return preferIncoming
+    ? mergeCredentialByPriority(incoming, existing)
+    : mergeCredentialByPriority(existing, incoming);
+}
+
 function assertMatchingProfileIdentity(profileId, existing, incoming) {
   const existingCodexUserId = resolveCodexUserId(existing);
   const incomingCodexUserId = resolveCodexUserId(incoming);
@@ -1192,20 +1266,23 @@ function summarizeImportActions(actions) {
   });
 }
 
-function previewBundleImport(localStore, importedStore) {
+function previewBundleImport(localStore, importedStore, options = {}) {
   const normalizedLocal = normalizeDuplicateProfiles(localStore);
   const next = buildLocalAuthStore(normalizedLocal.store);
   const existingIds = new Set(Object.keys(next.profiles));
   const idMap = new Map();
   const actions = [...normalizedLocal.actions];
   const importedOrder = getPreferredOrder(importedStore);
+  const preferLaterImportedExpiry = options.preferLaterImportedExpiry !== false;
 
   for (const [incomingProfileId, incomingCredential] of Object.entries(importedStore.profiles)) {
     const targetProfileId = resolveImportTargetProfileId(next, incomingProfileId, incomingCredential);
 
     if (targetProfileId) {
       const existing = next.profiles[targetProfileId];
-      const merged = mergeRefreshedCredential(existing, incomingCredential);
+      const merged = preferLaterImportedExpiry
+        ? mergeImportedCredential(existing, incomingCredential)
+        : mergeRefreshedCredential(existing, incomingCredential);
       const type = serializeComparable(existing) === serializeComparable(merged) ? "skip" : "update";
       next.profiles[targetProfileId] = merged;
       idMap.set(incomingProfileId, targetProfileId);
@@ -1287,7 +1364,9 @@ function mergeImportedProfiles(localStore, importedProfiles, importedOrder = [],
         }
       : undefined,
   });
-  return previewBundleImport(localStore, nextImportedStore).store;
+  return previewBundleImport(localStore, nextImportedStore, {
+    preferLaterImportedExpiry: false,
+  }).store;
 }
 
 function mergeHermesSidecarIntoStore(store, hermesRuntime, options = {}) {
