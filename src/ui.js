@@ -1269,6 +1269,41 @@ export function renderHtml() {
         margin-bottom: 14px;
       }
 
+      .account-bulk-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 12px;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+        padding: 14px 16px;
+        border-radius: var(--radius-md);
+        border: 1px solid rgba(95, 68, 42, 0.14);
+        background: linear-gradient(180deg, rgba(255, 251, 245, 0.94), rgba(242, 234, 223, 0.9));
+      }
+
+      .account-bulk-summary {
+        display: grid;
+        gap: 4px;
+      }
+
+      .account-bulk-summary strong {
+        font-size: 0.92rem;
+        color: #3e2819;
+      }
+
+      .account-bulk-summary span {
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .account-bulk-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
       .panel-copy {
         max-width: 560px;
         margin: 6px 0 0;
@@ -1550,6 +1585,7 @@ export function renderHtml() {
       }
 
       .profile-card {
+        position: relative;
         display: grid;
         gap: 12px;
         padding: 18px 18px 16px;
@@ -1581,11 +1617,43 @@ export function renderHtml() {
         border-color: rgba(162, 61, 49, 0.26);
       }
 
+      .profile-card.selected {
+        border-color: rgba(28, 90, 86, 0.34);
+        box-shadow: 0 22px 48px rgba(28, 90, 86, 0.14);
+      }
+
+      .profile-card.selected::after {
+        content: "";
+        position: absolute;
+        inset: 12px;
+        border-radius: calc(var(--radius-lg) - 8px);
+        border: 1px solid rgba(28, 90, 86, 0.16);
+        pointer-events: none;
+      }
+
       .profile-head {
         display: flex;
         gap: 14px;
         align-items: flex-start;
         justify-content: space-between;
+      }
+
+      .profile-select-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 30px;
+        padding: 0 2px 0 0;
+        color: var(--muted);
+        font-size: 0.76rem;
+        user-select: none;
+      }
+
+      .profile-select-toggle input {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: var(--accent-2);
       }
 
       .profile-main {
@@ -2253,7 +2321,8 @@ export function renderHtml() {
         }
 
         .panel-head,
-        .profile-group-head {
+        .profile-group-head,
+        .account-bulk-bar {
           flex-direction: column;
         }
 
@@ -2262,6 +2331,16 @@ export function renderHtml() {
         }
 
         .view-switch-button {
+          flex: 1 1 0;
+        }
+
+        .account-bulk-actions {
+          width: 100%;
+          justify-content: stretch;
+        }
+
+        .account-bulk-actions .button-secondary,
+        .account-bulk-actions .button-danger {
           flex: 1 1 0;
         }
 
@@ -2480,6 +2559,17 @@ export function renderHtml() {
                   data-accounts-view="grouped"
                   aria-pressed="false"
                 >邮箱后缀分组</button>
+              </div>
+            </div>
+            <div id="accountsBulkBar" class="account-bulk-bar" hidden>
+              <div class="account-bulk-summary">
+                <strong id="accountsBulkCount">已选 0 个账号</strong>
+                <span id="accountsBulkHint">可多选后一起删除。</span>
+              </div>
+              <div class="account-bulk-actions">
+                <button id="accountsSelectAllButton" class="button-secondary" type="button">全选</button>
+                <button id="accountsClearSelectionButton" class="button-secondary" type="button">清空</button>
+                <button id="accountsDeleteSelectedButton" class="button-danger" type="button">删除所选</button>
               </div>
             </div>
             <div id="profilesList" class="profile-list"></div>
@@ -2890,8 +2980,10 @@ export function renderHtml() {
         usageProxyUrl: "",
         activeTab: "accounts",
         accountsView: "quota",
+        selectedProfileIds: [],
         manageMode: null,
         manageRow: null,
+        manageRows: [],
         toolbarActionKey: "refresh",
       };
 
@@ -2989,6 +3081,12 @@ export function renderHtml() {
       const recommendedOrder = document.getElementById("recommendedOrder");
       const profilesList = document.getElementById("profilesList");
       const emptyState = document.getElementById("emptyState");
+      const accountsBulkBar = document.getElementById("accountsBulkBar");
+      const accountsBulkCount = document.getElementById("accountsBulkCount");
+      const accountsBulkHint = document.getElementById("accountsBulkHint");
+      const accountsSelectAllButton = document.getElementById("accountsSelectAllButton");
+      const accountsClearSelectionButton = document.getElementById("accountsClearSelectionButton");
+      const accountsDeleteSelectedButton = document.getElementById("accountsDeleteSelectedButton");
       const accountsViewQuotaButton = document.getElementById("accountsViewQuota");
       const accountsViewGroupedButton = document.getElementById("accountsViewGrouped");
 
@@ -4120,8 +4218,14 @@ export function renderHtml() {
         manageModalSubmitButton.disabled = disabled || loginInProgress;
         tokenReminderModalFocusButton.disabled = disabled;
         tokenReminderModalDismissButton.disabled = disabled;
+        accountsSelectAllButton.disabled = disabled || !storeReady || getSelectableProfileIds().length === 0 || getSelectedProfileIds().length === getSelectableProfileIds().length;
+        accountsClearSelectionButton.disabled = disabled || !storeReady || getSelectedProfileIds().length === 0;
+        accountsDeleteSelectedButton.disabled = disabled || !storeReady || getSelectedProfileIds().length === 0;
         document.querySelectorAll("[data-action-button]").forEach((button) => {
           button.disabled = button.dataset.lockedDisabled === "true" || disabled || loginInProgress || !storeReady;
+        });
+        document.querySelectorAll("[data-profile-select]").forEach((input) => {
+          input.disabled = disabled || loginInProgress || !storeReady;
         });
       }
 
@@ -4201,6 +4305,7 @@ export function renderHtml() {
       function closeManageModal() {
         appState.manageMode = null;
         appState.manageRow = null;
+        appState.manageRows = [];
         setManageModalError("");
         manageModal.hidden = true;
         manageModal.setAttribute("aria-hidden", "true");
@@ -4232,17 +4337,33 @@ export function renderHtml() {
         });
       }
 
-      function openDeleteModal(row) {
+      function openDeleteModal(rowOrRows) {
+        const rows = Array.isArray(rowOrRows) ? rowOrRows : [rowOrRows];
+        const validRows = rows.filter(Boolean);
+        if (!validRows.length) {
+          return;
+        }
+        const count = validRows.length;
+        const summaryText = count === 1
+          ? validRows[0].profileId
+          : "共 " + count + " 个账号";
+        const hintText = count === 1
+          ? (validRows[0].email || validRows[0].displayLabel || "确认后删除")
+          : validRows
+            .slice(0, 3)
+            .map((row) => row.email || row.displayLabel || row.profileId)
+            .join(" / ") + (count > 3 ? " 等" : "");
         appState.manageMode = "delete";
-        appState.manageRow = row;
+        appState.manageRow = validRows[0];
+        appState.manageRows = validRows;
         manageModalEyebrow.textContent = "Delete Profile";
-        manageModalTitle.textContent = "删除账号";
-        manageModalCopy.textContent = "删除后会一起移除";
-        manageProfileIdText.textContent = row.profileId;
-        manageProfileHint.textContent = row.email || row.displayLabel || "确认后删除";
+        manageModalTitle.textContent = count === 1 ? "删除账号" : "批量删除账号";
+        manageModalCopy.textContent = count === 1 ? "删除后会一起移除" : "删除后会一起移除所选账号";
+        manageProfileIdText.textContent = summaryText;
+        manageProfileHint.textContent = hintText;
         renameField.hidden = true;
         deleteField.hidden = false;
-        manageModalSubmitButton.textContent = "确认删除";
+        manageModalSubmitButton.textContent = count === 1 ? "确认删除" : "确认批量删除";
         manageModalSubmitButton.className = "button-danger";
         setManageModalError("");
         openManageModal();
@@ -4963,10 +5084,70 @@ export function renderHtml() {
         return Array.from(groups.values());
       }
 
+      function getSelectableProfileIds(data = appState.data) {
+        return Array.isArray(data?.rows) ? data.rows.map((row) => row.profileId) : [];
+      }
+
+      function getSelectedProfileIds() {
+        return Array.isArray(appState.selectedProfileIds) ? appState.selectedProfileIds : [];
+      }
+
+      function isProfileSelected(profileId) {
+        return getSelectedProfileIds().includes(profileId);
+      }
+
+      function setSelectedProfiles(profileIds) {
+        const allowed = new Set(getSelectableProfileIds());
+        const next = [];
+        for (const profileId of Array.isArray(profileIds) ? profileIds : []) {
+          if (typeof profileId !== "string" || !allowed.has(profileId) || next.includes(profileId)) {
+            continue;
+          }
+          next.push(profileId);
+        }
+        appState.selectedProfileIds = next;
+      }
+
+      function toggleSelectedProfile(profileId, checked) {
+        const next = new Set(getSelectedProfileIds());
+        if (checked) {
+          next.add(profileId);
+        } else {
+          next.delete(profileId);
+        }
+        setSelectedProfiles(Array.from(next));
+      }
+
+      function getRowsByProfileId() {
+        return new Map((appState.data?.rows || []).map((row) => [row.profileId, row]));
+      }
+
+      function renderBulkSelectionState() {
+        const total = getSelectableProfileIds().length;
+        const selected = getSelectedProfileIds().length;
+        accountsBulkBar.hidden = total === 0;
+        accountsBulkCount.textContent = "已选 " + selected + " 个账号";
+        if (selected > 0) {
+          accountsBulkHint.textContent = selected === total
+            ? "当前列表已全选，可以一起删除。"
+            : "确认后会一次删除所选账号。";
+        } else {
+          accountsBulkHint.textContent = "可多选后一起删除。";
+        }
+        accountsSelectAllButton.textContent = selected === total && total > 0 ? "已全选" : "全选";
+        accountsSelectAllButton.disabled = appState.busy || total === 0 || selected === total;
+        accountsClearSelectionButton.disabled = appState.busy || selected === 0;
+        accountsDeleteSelectedButton.disabled = appState.busy || selected === 0;
+      }
+
       function createProfileCard(row) {
         const card = document.createElement("article");
         const isTop = row.recommendedOrderIndex === 0;
-        card.className = "profile-card" + (isTop ? " top" : "") + (row.error ? " problem" : "");
+        const selected = isProfileSelected(row.profileId);
+        card.className = "profile-card"
+          + (isTop ? " top" : "")
+          + (row.error ? " problem" : "")
+          + (selected ? " selected" : "");
         const primaryRemaining = getRemainingPercent(row.primary);
         const availability = getProfileAvailability(row);
 
@@ -5011,6 +5192,24 @@ export function renderHtml() {
 
         headerMeta.appendChild(leadTag);
         headerMeta.appendChild(stateRow);
+
+        const selectLabel = document.createElement("label");
+        selectLabel.className = "profile-select-toggle";
+        const selectInput = document.createElement("input");
+        selectInput.type = "checkbox";
+        selectInput.checked = selected;
+        selectInput.dataset.profileSelect = "true";
+        selectInput.disabled = appState.busy;
+        selectInput.addEventListener("change", () => {
+          toggleSelectedProfile(row.profileId, selectInput.checked);
+          card.classList.toggle("selected", selectInput.checked);
+          renderBulkSelectionState();
+        });
+        const selectText = document.createElement("span");
+        selectText.textContent = "选择";
+        selectLabel.appendChild(selectInput);
+        selectLabel.appendChild(selectText);
+        headerMeta.appendChild(selectLabel);
 
         head.appendChild(main);
         head.appendChild(headerMeta);
@@ -5204,6 +5403,7 @@ export function renderHtml() {
         profilesList.innerHTML = "";
         emptyState.hidden = data.rows.length > 0;
         if (!data.rows.length) {
+          renderBulkSelectionState();
           return;
         }
 
@@ -5251,6 +5451,7 @@ export function renderHtml() {
           });
 
           profilesList.appendChild(fragment);
+          renderBulkSelectionState();
           return;
         }
 
@@ -5260,6 +5461,7 @@ export function renderHtml() {
           fragment.appendChild(createProfileCard(row));
         });
         profilesList.appendChild(fragment);
+        renderBulkSelectionState();
       }
 
       function formatRuntimeAuthTargets(context) {
@@ -5312,6 +5514,7 @@ export function renderHtml() {
 
       function render(data) {
         appState.data = data;
+        setSelectedProfiles(getSelectedProfileIds());
         applyTokenReminderSnapshot(buildTokenReminderSnapshotFromDashboardState(data));
         renderToolbarState(data);
         renderSpotlight(data);
@@ -6024,13 +6227,22 @@ export function renderHtml() {
         }
 
         if (appState.manageMode === "delete") {
-          const profileId = appState.manageRow.profileId;
+          const profileIds = (appState.manageRows || [])
+            .map((row) => row?.profileId)
+            .filter((profileId) => typeof profileId === "string" && profileId);
+          const isBatchDelete = profileIds.length > 1;
+          const profileId = profileIds[0];
           closeManageModal();
-          setBusy(true, "正在删除账号...", "info");
+          setBusy(true, isBatchDelete ? "正在删除所选账号..." : "正在删除账号...", "info");
           try {
-            const nextState = await postJson("/api/delete-profile", { profileId });
+            const nextState = isBatchDelete
+              ? await postJson("/api/delete-profiles", { profileIds })
+              : await postJson("/api/delete-profile", { profileId });
+            if (isBatchDelete) {
+              setSelectedProfiles(getSelectedProfileIds().filter((entry) => !profileIds.includes(entry)));
+            }
             render(nextState);
-            setBusy(false, "账号已删除", "success");
+            setBusy(false, isBatchDelete ? "所选账号已删除" : "账号已删除", "success");
           } catch (error) {
             setBusy(false, String(error instanceof Error ? error.message : error), "danger");
           }
@@ -6142,6 +6354,29 @@ export function renderHtml() {
         button.addEventListener("click", () => {
           setActiveTab(button.dataset.tab || "accounts");
         });
+      });
+
+      accountsSelectAllButton.addEventListener("click", () => {
+        setSelectedProfiles(getSelectableProfileIds());
+        renderProfileCards(appState.data || { rows: [] });
+        syncControlState();
+      });
+
+      accountsClearSelectionButton.addEventListener("click", () => {
+        setSelectedProfiles([]);
+        renderProfileCards(appState.data || { rows: [] });
+        syncControlState();
+      });
+
+      accountsDeleteSelectedButton.addEventListener("click", () => {
+        const rowsByProfileId = getRowsByProfileId();
+        const rows = getSelectedProfileIds()
+          .map((profileId) => rowsByProfileId.get(profileId))
+          .filter(Boolean);
+        if (!rows.length) {
+          return;
+        }
+        openDeleteModal(rows);
       });
 
       addProfileSuffixInput.addEventListener("input", () => {
