@@ -3740,6 +3740,7 @@ test("previewImportBundle merges Codex profiles by chatgpt_user_id even when pro
         refresh: "refresh-local-user-1",
         accountId: "shared-account",
         email: "alex1@unfish.app",
+        expires: Date.now() + 30_000,
         codexAuth: {
           authMode: "chatgpt",
           idToken: "id-local-user-1",
@@ -3767,6 +3768,7 @@ test("previewImportBundle merges Codex profiles by chatgpt_user_id even when pro
         refresh: "refresh-imported-user-1",
         accountId: "shared-account",
         email: "alex1@unfish.app",
+        expires: Date.now() + 120_000,
         codexAuth: {
           authMode: "chatgpt",
           idToken: "id-imported-user-1",
@@ -3813,6 +3815,337 @@ test("previewImportBundle merges Codex profiles by chatgpt_user_id even when pro
         targetProfileId: "openai-codex:fish1",
       },
     ]);
+  } finally {
+    fs.rmSync(targetStateDir, { recursive: true, force: true });
+    fs.rmSync(sourceStateDir, { recursive: true, force: true });
+  }
+});
+
+test("commitImportBundle prefers imported credential with later expiry and backfills missing fields", async () => {
+  const targetStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-import-later-expiry-"));
+  const targetLocalStateDir = path.join(targetStateDir, ".local");
+  const targetCodexAuthPath = path.join(targetStateDir, ".codex", "auth.json");
+  const sourceStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-import-later-expiry-src-"));
+  const sourceLocalStateDir = path.join(sourceStateDir, ".local");
+  const sourceCodexAuthPath = path.join(sourceStateDir, ".codex", "auth.json");
+  const importedAccess = createJwt({
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: "shared-account",
+      chatgpt_user_id: "user-1",
+    },
+    "https://api.openai.com/profile": {
+      email: "alex1@unfish.app",
+    },
+    issued_at: "imported",
+  });
+
+  writeLocalStore(targetStateDir, {
+    profiles: {
+      "openai-codex:fish1": createOauthProfile({
+        access: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "shared-account",
+            chatgpt_user_id: "user-1",
+          },
+          "https://api.openai.com/profile": {
+            email: "alex1@unfish.app",
+          },
+          issued_at: "local",
+        }),
+        refresh: "refresh-local-user-1",
+        accountId: "shared-account",
+        email: "alex1@unfish.app",
+        expires: Date.now() + 30_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "id-local-user-1",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:fish1"],
+    },
+  });
+
+  writeLocalStore(sourceStateDir, {
+    profiles: {
+      "openai-codex:alex1unfish": createOauthProfile({
+        access: importedAccess,
+        refresh: undefined,
+        accountId: "shared-account",
+        email: "alex1@unfish.app",
+        expires: Date.now() + 120_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "id-imported-user-1",
+          lastRefresh: "2026-04-03T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:alex1unfish"],
+    },
+  });
+
+  const usageFetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        rate_limit: {
+          primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+          secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+        },
+      };
+    },
+  });
+
+  try {
+    const exported = await exportBundle(
+      { stateDir: sourceStateDir, localStateDir: sourceLocalStateDir, agent: "main", codexAuthPath: sourceCodexAuthPath },
+      { passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    const preview = await previewImportBundle(
+      { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+      { bundle: exported.bundle, passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    assert.equal(preview.preview.summary.update, 1);
+
+    await commitImportBundle(
+      { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+      { bundle: exported.bundle, passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    const localStore = readAuthStore(path.join(targetLocalStateDir, "auth-store.json"));
+    assert.equal(localStore.profiles["openai-codex:alex1unfish"], undefined);
+    assert.equal(localStore.profiles["openai-codex:fish1"].access, importedAccess);
+    assert.equal(localStore.profiles["openai-codex:fish1"].refresh, "refresh-local-user-1");
+    assert.ok(localStore.profiles["openai-codex:fish1"].expires > Date.now() + 60_000);
+    assert.equal(localStore.profiles["openai-codex:fish1"].codexAuth.idToken, "id-imported-user-1");
+    assert.equal(localStore.profiles["openai-codex:fish1"].codexAuth.lastRefresh, "2026-04-03T18:02:46.501Z");
+  } finally {
+    fs.rmSync(targetStateDir, { recursive: true, force: true });
+    fs.rmSync(sourceStateDir, { recursive: true, force: true });
+  }
+});
+
+test("previewImportBundle skips older imported credential when local credential is newer", async () => {
+  const targetStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-import-older-expiry-"));
+  const targetLocalStateDir = path.join(targetStateDir, ".local");
+  const targetCodexAuthPath = path.join(targetStateDir, ".codex", "auth.json");
+  const sourceStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-import-older-expiry-src-"));
+  const sourceLocalStateDir = path.join(sourceStateDir, ".local");
+  const sourceCodexAuthPath = path.join(sourceStateDir, ".codex", "auth.json");
+  const localAccess = createJwt({
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: "shared-account",
+      chatgpt_user_id: "user-1",
+    },
+    "https://api.openai.com/profile": {
+      email: "alex1@unfish.app",
+    },
+    issued_at: "local-newer",
+  });
+
+  writeLocalStore(targetStateDir, {
+    profiles: {
+      "openai-codex:fish1": createOauthProfile({
+        access: localAccess,
+        refresh: "refresh-local-user-1",
+        accountId: "shared-account",
+        email: "alex1@unfish.app",
+        expires: Date.now() + 120_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "id-local-user-1",
+          lastRefresh: "2026-04-03T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:fish1"],
+    },
+  });
+
+  writeLocalStore(sourceStateDir, {
+    profiles: {
+      "openai-codex:alex1unfish": createOauthProfile({
+        access: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "shared-account",
+            chatgpt_user_id: "user-1",
+          },
+          "https://api.openai.com/profile": {
+            email: "alex1@unfish.app",
+          },
+          issued_at: "imported-older",
+        }),
+        refresh: "refresh-imported-user-1",
+        accountId: "shared-account",
+        email: "alex1@unfish.app",
+        expires: Date.now() + 30_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "id-imported-user-1",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:alex1unfish"],
+    },
+  });
+
+  const usageFetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        rate_limit: {
+          primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+          secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+        },
+      };
+    },
+  });
+
+  try {
+    const exported = await exportBundle(
+      { stateDir: sourceStateDir, localStateDir: sourceLocalStateDir, agent: "main", codexAuthPath: sourceCodexAuthPath },
+      { passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    const preview = await previewImportBundle(
+      { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+      { bundle: exported.bundle, passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    assert.equal(preview.preview.summary.skip, 1);
+    assert.equal(preview.preview.summary.update, 0);
+
+    await commitImportBundle(
+      { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+      { bundle: exported.bundle, passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    const localStore = readAuthStore(path.join(targetLocalStateDir, "auth-store.json"));
+    assert.equal(localStore.profiles["openai-codex:fish1"].access, localAccess);
+    assert.equal(localStore.profiles["openai-codex:fish1"].refresh, "refresh-local-user-1");
+    assert.equal(localStore.profiles["openai-codex:fish1"].codexAuth.idToken, "id-local-user-1");
+    assert.equal(localStore.profiles["openai-codex:fish1"].codexAuth.lastRefresh, "2026-04-03T18:02:46.501Z");
+  } finally {
+    fs.rmSync(targetStateDir, { recursive: true, force: true });
+    fs.rmSync(sourceStateDir, { recursive: true, force: true });
+  }
+});
+
+test("commitImportBundle keeps local credential as primary when imported expiry is missing", async () => {
+  const targetStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-import-missing-expiry-"));
+  const targetLocalStateDir = path.join(targetStateDir, ".local");
+  const targetCodexAuthPath = path.join(targetStateDir, ".codex", "auth.json");
+  const sourceStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-import-missing-expiry-src-"));
+  const sourceLocalStateDir = path.join(sourceStateDir, ".local");
+  const sourceCodexAuthPath = path.join(sourceStateDir, ".codex", "auth.json");
+  const localAccess = createJwt({
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: "shared-account",
+      chatgpt_user_id: "user-1",
+    },
+    "https://api.openai.com/profile": {
+      email: "alex1@unfish.app",
+    },
+    issued_at: "local-with-expiry",
+  });
+
+  writeLocalStore(targetStateDir, {
+    profiles: {
+      "openai-codex:fish1": createOauthProfile({
+        access: localAccess,
+        refresh: "refresh-local-user-1",
+        accountId: "shared-account",
+        email: undefined,
+        expires: Date.now() + 90_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "id-local-user-1",
+          lastRefresh: "2026-04-03T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:fish1"],
+    },
+  });
+
+  writeLocalStore(sourceStateDir, {
+    profiles: {
+      "openai-codex:alex1unfish": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "shared-account",
+            chatgpt_user_id: "user-1",
+          },
+          "https://api.openai.com/profile": {
+            email: "alex1@unfish.app",
+          },
+          issued_at: "imported-no-expiry",
+        }),
+        refresh: "refresh-imported-user-1",
+        accountId: "shared-account",
+        email: "alex1@unfish.app",
+      },
+    },
+    order: {
+      "openai-codex": ["openai-codex:alex1unfish"],
+    },
+  });
+
+  const usageFetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        rate_limit: {
+          primary_window: { used_percent: 15, reset_at: 200, limit_window_seconds: 18000 },
+          secondary_window: { used_percent: 25, reset_at: 400, limit_window_seconds: 604800 },
+        },
+      };
+    },
+  });
+
+  try {
+    const exported = await exportBundle(
+      { stateDir: sourceStateDir, localStateDir: sourceLocalStateDir, agent: "main", codexAuthPath: sourceCodexAuthPath },
+      { passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    const preview = await previewImportBundle(
+      { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+      { bundle: exported.bundle, passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    assert.equal(preview.preview.summary.update, 1);
+
+    await commitImportBundle(
+      { stateDir: targetStateDir, localStateDir: targetLocalStateDir, agent: "main", codexAuthPath: targetCodexAuthPath },
+      { bundle: exported.bundle, passphrase: "secret-passphrase" },
+      { fetchImpl: usageFetch },
+    );
+
+    const localStore = readAuthStore(path.join(targetLocalStateDir, "auth-store.json"));
+    assert.equal(localStore.profiles["openai-codex:fish1"].access, localAccess);
+    assert.equal(localStore.profiles["openai-codex:fish1"].email, "alex1@unfish.app");
+    assert.equal(localStore.profiles["openai-codex:fish1"].expires > Date.now(), true);
   } finally {
     fs.rmSync(targetStateDir, { recursive: true, force: true });
     fs.rmSync(sourceStateDir, { recursive: true, force: true });
