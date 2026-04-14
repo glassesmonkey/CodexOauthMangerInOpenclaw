@@ -30,7 +30,12 @@ By default the dashboard listens on `http://127.0.0.1:3001`.
 The dashboard auto-detects:
 
 - `~/.openclaw/openclaw.json`
-- `~/.openclaw/agents/main/agent/auth-profiles.json`
+- `~/.openclaw/agents/main/agent/auth-profiles.json` as the primary runtime file
+
+When rebuilding or exporting runtime projections, the dashboard now syncs `auth-profiles.json`
+across every existing agent under `~/.openclaw/agents/*/agent/`.
+At the same time it clears auto-selected `openai-codex` session overrides in each synced
+agent's `sessions/sessions.json`, while leaving session transcript `.jsonl` files untouched.
 
 Override when needed:
 
