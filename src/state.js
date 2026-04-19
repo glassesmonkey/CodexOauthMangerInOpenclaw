@@ -2,7 +2,15 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { CODEX_PROVIDER, PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT } from "./constants.js";
+import {
+  CODEX_PROVIDER,
+  MIN_TOKEN_REFRESH_INTERVAL_SECONDS,
+  PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT,
+  TOKEN_KEEPALIVE_MANUAL_COOLDOWN_MS,
+  TOKEN_KEEPALIVE_MANUAL_WINDOW_MS,
+  TOKEN_KEEPALIVE_SCHEDULED_BUFFER_MS,
+  TOKEN_REFRESH_EXPIRY_GRACE_MS,
+} from "./constants.js";
 import {
   applyOrderToAuthStore,
   buildLocalAuthStore,
@@ -297,6 +305,7 @@ function createEmptyMaintenance() {
     lastSuccessAt: null,
     lastError: null,
     lastChangedProfileIds: [],
+    lastRefreshByProfileId: {},
   };
 }
 
@@ -307,7 +316,70 @@ function buildMaintenanceSummary(store) {
     lastChangedProfileIds: Array.isArray(store?.maintenance?.lastChangedProfileIds)
       ? store.maintenance.lastChangedProfileIds.filter((entry) => typeof entry === "string" && entry.trim())
       : [],
+    lastRefreshByProfileId: isRecord(store?.maintenance?.lastRefreshByProfileId)
+      ? Object.fromEntries(
+        Object.entries(store.maintenance.lastRefreshByProfileId)
+          .filter(([profileId, timestamp]) => typeof profileId === "string" && profileId.trim() && typeof timestamp === "string" && timestamp.trim()),
+      )
+      : {},
   };
+}
+
+function normalizeKeepaliveTrigger(value) {
+  return value === "scheduled" ? "scheduled" : "manual";
+}
+
+function normalizeTokenRefreshIntervalSeconds(value) {
+  const intervalSeconds = Math.floor(Number(value) || 0);
+  if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) {
+    return 0;
+  }
+  return Math.max(MIN_TOKEN_REFRESH_INTERVAL_SECONDS, intervalSeconds);
+}
+
+function getKeepaliveScheduledIntervalSeconds(trigger, value) {
+  if (normalizeKeepaliveTrigger(trigger) !== "scheduled") {
+    return 0;
+  }
+  return normalizeTokenRefreshIntervalSeconds(value) || MIN_TOKEN_REFRESH_INTERVAL_SECONDS;
+}
+
+function getKeepaliveCooldownExpiryMs(maintenance, profileId) {
+  const lastRefresh = typeof maintenance?.lastRefreshByProfileId?.[profileId] === "string"
+    ? Date.parse(maintenance.lastRefreshByProfileId[profileId])
+    : Number.NaN;
+  if (!Number.isFinite(lastRefresh)) {
+    return null;
+  }
+  return lastRefresh + TOKEN_KEEPALIVE_MANUAL_COOLDOWN_MS;
+}
+
+function evaluateKeepaliveEligibility(profileId, credential, maintenance, trigger, intervalSeconds, nowMs) {
+  const expiresAt = resolveExpiresAt(credential);
+  const urgent = typeof expiresAt === "number" && expiresAt <= nowMs + TOKEN_REFRESH_EXPIRY_GRACE_MS;
+
+  if (!Number.isFinite(expiresAt)) {
+    return { shouldRefresh: true, reason: "missing-expiry" };
+  }
+
+  if (normalizeKeepaliveTrigger(trigger) === "scheduled") {
+    const scheduledWindowMs = getKeepaliveScheduledIntervalSeconds("scheduled", intervalSeconds) * 1_000
+      + TOKEN_KEEPALIVE_SCHEDULED_BUFFER_MS;
+    return expiresAt <= nowMs + scheduledWindowMs
+      ? { shouldRefresh: true, reason: urgent ? "urgent" : "scheduled-window" }
+      : { shouldRefresh: false, reason: "too-early" };
+  }
+
+  if (!urgent && expiresAt > nowMs + TOKEN_KEEPALIVE_MANUAL_WINDOW_MS) {
+    return { shouldRefresh: false, reason: "too-early" };
+  }
+
+  const cooldownExpiresAt = getKeepaliveCooldownExpiryMs(maintenance, profileId);
+  if (!urgent && typeof cooldownExpiresAt === "number" && cooldownExpiresAt > nowMs) {
+    return { shouldRefresh: false, reason: "cooldown" };
+  }
+
+  return { shouldRefresh: true, reason: urgent ? "urgent" : "manual-window" };
 }
 
 function compareProfilePriority(leftProfileId, rightProfileId, orderIndexById) {
@@ -466,16 +538,27 @@ function summarizeFailedProfiles(failedProfiles) {
 
 function applyMaintenanceUpdate(store, maintenance) {
   const next = buildLocalAuthStore(store);
+  const existing = buildMaintenanceSummary(next);
   const updated = {
     ...createEmptyMaintenance(),
-    ...buildMaintenanceSummary(next),
+    ...existing,
     ...(isRecord(maintenance) ? maintenance : {}),
     lastChangedProfileIds: Array.isArray(maintenance?.lastChangedProfileIds)
       ? dedupeStrings(maintenance.lastChangedProfileIds)
-      : buildMaintenanceSummary(next).lastChangedProfileIds,
+      : existing.lastChangedProfileIds,
+    lastRefreshByProfileId: isRecord(maintenance?.lastRefreshByProfileId)
+      ? {
+        ...existing.lastRefreshByProfileId,
+        ...maintenance.lastRefreshByProfileId,
+      }
+      : existing.lastRefreshByProfileId,
   };
 
-  next.maintenance = updated.lastAttemptAt || updated.lastSuccessAt || updated.lastError || updated.lastChangedProfileIds.length > 0
+  next.maintenance = updated.lastAttemptAt
+    || updated.lastSuccessAt
+    || updated.lastError
+    || updated.lastChangedProfileIds.length > 0
+    || Object.keys(updated.lastRefreshByProfileId).length > 0
     ? updated
     : undefined;
   return next;
@@ -1727,14 +1810,40 @@ export async function runTokenKeepalive(options, deps = {}) {
   ensureLocalStoreInitialized(context);
   const configOrder = context.configExists ? getConfigCodexOrder(readOpenClawConfig(context.configPath)) : [];
   const attemptedAt = new Date().toISOString();
+  const attemptedAtMs = Date.parse(attemptedAt);
+  const trigger = normalizeKeepaliveTrigger(deps.trigger);
+  const scheduledIntervalSeconds = getKeepaliveScheduledIntervalSeconds(trigger, deps.intervalSeconds);
   const failedProfiles = [];
   const changedProfileIds = [];
+  let checkedCount = 0;
+  let skippedTooEarlyCount = 0;
+  let skippedCooldownCount = 0;
   let exportedRuntime = false;
 
   const nextStore = buildLocalAuthStore(readLocalAuthStore(context));
+  const maintenance = buildMaintenanceSummary(nextStore);
+  const lastRefreshByProfileId = { ...maintenance.lastRefreshByProfileId };
 
   for (const entry of listCodexProfiles(nextStore)) {
     if (entry.credential?.type !== "oauth") {
+      continue;
+    }
+    checkedCount += 1;
+
+    const eligibility = evaluateKeepaliveEligibility(
+      entry.profileId,
+      entry.credential,
+      maintenance,
+      trigger,
+      scheduledIntervalSeconds,
+      attemptedAtMs,
+    );
+    if (!eligibility.shouldRefresh) {
+      if (eligibility.reason === "cooldown") {
+        skippedCooldownCount += 1;
+      } else {
+        skippedTooEarlyCount += 1;
+      }
       continue;
     }
 
@@ -1742,15 +1851,18 @@ export async function runTokenKeepalive(options, deps = {}) {
       const resolved = deps.refreshImpl
         ? await resolveCredentialToken(entry.credential, {
           proxyConfig: deps.proxyConfig,
+          forceRefresh: true,
           refreshImpl: deps.refreshImpl,
         })
         : await resolveCredentialToken(entry.credential, {
           proxyConfig: deps.proxyConfig,
+          forceRefresh: true,
         });
 
       if (resolved.updated) {
         nextStore.profiles[entry.profileId] = mergeRefreshedCredential(nextStore.profiles[entry.profileId], resolved.credential);
         changedProfileIds.push(entry.profileId);
+        lastRefreshByProfileId[entry.profileId] = attemptedAt;
       }
     } catch (error) {
       failedProfiles.push({
@@ -1765,6 +1877,7 @@ export async function runTokenKeepalive(options, deps = {}) {
     lastSuccessAt: attemptedAt,
     lastError: summarizeFailedProfiles(failedProfiles),
     lastChangedProfileIds: changedProfileIds,
+    lastRefreshByProfileId,
   });
 
   fs.mkdirSync(path.dirname(context.localAuthStorePath), { recursive: true });
@@ -1783,7 +1896,13 @@ export async function runTokenKeepalive(options, deps = {}) {
 
   return {
     attemptedAt,
+    trigger,
+    intervalSeconds: scheduledIntervalSeconds,
+    checkedCount,
     refreshedCount: changedProfileIds.length,
+    skippedTooEarlyCount,
+    skippedCooldownCount,
+    failedCount: failedProfiles.length,
     changedProfileIds,
     failedProfiles,
     exportedRuntime,

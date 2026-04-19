@@ -2896,7 +2896,12 @@ test("runTokenKeepalive refreshes OAuth profiles, updates maintenance, and rewri
       },
     );
 
+    assert.equal(result.trigger, "manual");
+    assert.equal(result.checkedCount, 2);
     assert.equal(result.refreshedCount, 2);
+    assert.equal(result.skippedTooEarlyCount, 0);
+    assert.equal(result.skippedCooldownCount, 0);
+    assert.equal(result.failedCount, 0);
     assert.equal(result.exportedRuntime, true);
     assert.deepEqual(result.changedProfileIds, ["openai-codex:default", "openai-codex:work"]);
 
@@ -2905,6 +2910,8 @@ test("runTokenKeepalive refreshes OAuth profiles, updates maintenance, and rewri
     assert.equal(localStore.profiles["openai-codex:work"].refresh, "next-work-refresh");
     assert.ok(localStore.maintenance?.lastAttemptAt);
     assert.deepEqual(localStore.maintenance?.lastChangedProfileIds, ["openai-codex:default", "openai-codex:work"]);
+    assert.equal(typeof localStore.maintenance?.lastRefreshByProfileId?.["openai-codex:default"], "string");
+    assert.equal(typeof localStore.maintenance?.lastRefreshByProfileId?.["openai-codex:work"], "string");
 
     const runtimeRaw = JSON.parse(fs.readFileSync(path.join(agentDir, "auth-profiles.json"), "utf8"));
     assert.equal(runtimeRaw.maintenance, undefined);
@@ -2920,6 +2927,220 @@ test("runTokenKeepalive refreshes OAuth profiles, updates maintenance, and rewri
       "openai-codex:default",
       "openai-codex:work",
     ]);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("runTokenKeepalive refreshes tokens inside the manual window and skips earlier ones", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-keepalive-manual-window-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const refreshCalls = [];
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:within-window": createOauthProfile({
+        access: "within-access",
+        refresh: "within-refresh",
+        accountId: "account-within",
+        email: "within@example.com",
+        expires: Date.now() + 5 * 60 * 60 * 1_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "within-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:outside-window": createOauthProfile({
+        access: "outside-access",
+        refresh: "outside-refresh",
+        accountId: "account-outside",
+        email: "outside@example.com",
+        expires: Date.now() + 8 * 60 * 60 * 1_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "outside-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:within-window", "openai-codex:outside-window"],
+    },
+  });
+
+  try {
+    const result = await runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        refreshImpl: async (refreshToken) => {
+          refreshCalls.push(refreshToken);
+          return {
+            access: "next-access",
+            refresh: "next-refresh",
+            expires: Date.now() + 60_000,
+          };
+        },
+      },
+    );
+
+    assert.equal(result.trigger, "manual");
+    assert.equal(result.checkedCount, 2);
+    assert.equal(result.refreshedCount, 1);
+    assert.equal(result.skippedTooEarlyCount, 1);
+    assert.equal(result.skippedCooldownCount, 0);
+    assert.equal(result.failedCount, 0);
+    assert.equal(result.exportedRuntime, true);
+    assert.deepEqual(refreshCalls, ["within-refresh"]);
+    assert.deepEqual(result.changedProfileIds, ["openai-codex:within-window"]);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("runTokenKeepalive respects manual cooldown but still refreshes urgent tokens", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-keepalive-manual-cooldown-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const refreshCalls = [];
+  const recentRefresh = new Date(Date.now() - 5 * 60 * 1_000).toISOString();
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:cooldown": createOauthProfile({
+        access: "cooldown-access",
+        refresh: "cooldown-refresh",
+        accountId: "account-cooldown",
+        email: "cooldown@example.com",
+        expires: Date.now() + 60 * 60 * 1_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "cooldown-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:urgent": createOauthProfile({
+        access: "urgent-access",
+        refresh: "urgent-refresh",
+        accountId: "account-urgent",
+        email: "urgent@example.com",
+        expires: Date.now() + 10_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "urgent-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:cooldown", "openai-codex:urgent"],
+    },
+    maintenance: {
+      lastRefreshByProfileId: {
+        "openai-codex:cooldown": recentRefresh,
+        "openai-codex:urgent": recentRefresh,
+      },
+    },
+  });
+
+  try {
+    const result = await runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        refreshImpl: async (refreshToken) => {
+          refreshCalls.push(refreshToken);
+          return {
+            access: `next-${refreshToken}`,
+            refresh: `next-${refreshToken}`,
+            expires: Date.now() + 60_000,
+          };
+        },
+      },
+    );
+
+    assert.deepEqual(refreshCalls, ["urgent-refresh"]);
+    assert.equal(result.checkedCount, 2);
+    assert.equal(result.refreshedCount, 1);
+    assert.equal(result.skippedTooEarlyCount, 0);
+    assert.equal(result.skippedCooldownCount, 1);
+    assert.equal(result.failedCount, 0);
+    assert.deepEqual(result.changedProfileIds, ["openai-codex:urgent"]);
+
+    const localStore = readAuthStore(path.join(localStateDir, "auth-store.json"));
+    assert.equal(localStore.profiles["openai-codex:cooldown"].access, "cooldown-access");
+    assert.equal(localStore.profiles["openai-codex:urgent"].access, "next-urgent-refresh");
+    assert.equal(localStore.maintenance?.lastRefreshByProfileId?.["openai-codex:cooldown"], recentRefresh);
+    assert.notEqual(localStore.maintenance?.lastRefreshByProfileId?.["openai-codex:urgent"], recentRefresh);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("runTokenKeepalive uses the scheduled window and clamps short intervals", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-keepalive-scheduled-window-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const refreshCalls = [];
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:within-window": createOauthProfile({
+        access: "within-access",
+        refresh: "within-refresh",
+        accountId: "account-within",
+        email: "within@example.com",
+        expires: Date.now() + 14 * 60 * 1_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "within-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+      "openai-codex:outside-window": createOauthProfile({
+        access: "outside-access",
+        refresh: "outside-refresh",
+        accountId: "account-outside",
+        email: "outside@example.com",
+        expires: Date.now() + 16 * 60 * 1_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "outside-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:within-window", "openai-codex:outside-window"],
+    },
+  });
+
+  try {
+    const result = await runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        trigger: "scheduled",
+        intervalSeconds: 60,
+        refreshImpl: async (refreshToken) => {
+          refreshCalls.push(refreshToken);
+          return {
+            access: `next-${refreshToken}`,
+            refresh: `next-${refreshToken}`,
+            expires: Date.now() + 60_000,
+          };
+        },
+      },
+    );
+
+    assert.equal(result.trigger, "scheduled");
+    assert.equal(result.intervalSeconds, 300);
+    assert.deepEqual(refreshCalls, ["within-refresh"]);
+    assert.equal(result.checkedCount, 2);
+    assert.equal(result.refreshedCount, 1);
+    assert.equal(result.skippedTooEarlyCount, 1);
+    assert.equal(result.skippedCooldownCount, 0);
+    assert.equal(result.failedCount, 0);
+    assert.deepEqual(result.changedProfileIds, ["openai-codex:within-window"]);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }

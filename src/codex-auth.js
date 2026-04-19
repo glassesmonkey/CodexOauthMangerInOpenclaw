@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import http from "node:http";
+import { TOKEN_REFRESH_EXPIRY_GRACE_MS } from "./constants.js";
 import { createUsageFetch } from "./usage-fetch.js";
 
 const OPENAI_AUTH_CLAIM = "https://api.openai.com/auth";
@@ -384,6 +385,7 @@ export function enrichOpenAICodexCredential(credential) {
 export async function resolveCredentialToken(credential, options = {}) {
   const refreshImpl = options.refreshImpl ?? refreshAccessToken;
   const proxyFetch = createUsageFetch(options.proxyConfig);
+  const forceRefresh = options.forceRefresh === true;
 
   if (credential?.type === "oauth") {
     const enrichedCredential = enrichOpenAICodexCredential(credential);
@@ -392,7 +394,7 @@ export async function resolveCredentialToken(credential, options = {}) {
       throw new Error("OAuth profile is missing access token");
     }
     const expiresAt = typeof enrichedCredential.expires === "number" ? enrichedCredential.expires : 0;
-    if (expiresAt > Date.now() + 30_000) {
+    if (!forceRefresh && expiresAt > Date.now() + TOKEN_REFRESH_EXPIRY_GRACE_MS) {
       return {
         token: enrichedCredential.access,
         credential: enrichedCredential,
