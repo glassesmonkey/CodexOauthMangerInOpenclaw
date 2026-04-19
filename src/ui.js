@@ -2605,14 +2605,14 @@ export function renderHtml() {
 
                 <div class="settings-section">
                   <button id="tokenRefreshButton" class="button-primary" type="button">立即刷新 Token</button>
-                  <p class="field-note">只刷新 OAuth token 生命周期，不会自动改推荐顺序。</p>
+                  <p class="field-note">只检查并刷新需要续期的 OAuth token，不会自动改推荐顺序。</p>
                 </div>
 
                 <div class="settings-section">
                   <label class="field">
                     <span class="field-label">Token 定时刷新（秒）</span>
                     <input id="tokenRefreshIntervalInput" class="input" type="number" min="0" step="1" value="0" />
-                    <span class="field-note">0 关闭。只有页面开着时才会执行。</span>
+                    <span class="field-note">0 关闭，其余最小 300 秒。只有页面开着时才会执行。</span>
                   </label>
                 </div>
               </section>
@@ -2629,7 +2629,7 @@ export function renderHtml() {
                     <div id="tokenLastAttemptValue" class="snapshot-value">-</div>
                   </div>
                   <div class="snapshot-item">
-                    <div class="stat-label">上次成功</div>
+                    <div class="stat-label">上次完成</div>
                     <div id="tokenLastSuccessValue" class="snapshot-value">-</div>
                   </div>
                   <div class="snapshot-item">
@@ -3002,6 +3002,7 @@ export function renderHtml() {
       const ACTIVE_TAB_STORAGE_KEY = "codex-auth-dashboard.active-tab";
       const ACCOUNTS_VIEW_STORAGE_KEY = "codex-auth-dashboard.accounts-view";
       const PROFILE_ID_PREFIX = "openai-codex:";
+      const MIN_TOKEN_REFRESH_INTERVAL_SECONDS = 300;
 
       const flashBanner = document.getElementById("flashBanner");
       const refreshButton = document.getElementById("refreshButton");
@@ -3119,6 +3120,14 @@ export function renderHtml() {
       const tokenReminderModalCloseButton = document.getElementById("tokenReminderModalCloseButton");
       const tokenReminderModalDismissButton = document.getElementById("tokenReminderModalDismissButton");
       const tokenReminderModalFocusButton = document.getElementById("tokenReminderModalFocusButton");
+
+      function normalizeTokenRefreshIntervalSeconds(value) {
+        const nextInterval = Math.floor(Number(value) || 0);
+        if (!Number.isFinite(nextInterval) || nextInterval <= 0) {
+          return 0;
+        }
+        return Math.max(MIN_TOKEN_REFRESH_INTERVAL_SECONDS, nextInterval);
+      }
 
       const PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT = ${JSON.stringify(PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT)};
       ${buildQuotaBoardSummary.toString()}
@@ -3946,7 +3955,7 @@ export function renderHtml() {
           }
           const storedTokenInterval = Number(window.localStorage.getItem(TOKEN_REFRESH_INTERVAL_STORAGE_KEY));
           if (Number.isFinite(storedTokenInterval) && storedTokenInterval >= 0) {
-            appState.tokenRefreshIntervalSeconds = Math.floor(storedTokenInterval);
+            appState.tokenRefreshIntervalSeconds = normalizeTokenRefreshIntervalSeconds(storedTokenInterval);
           }
           const storedReminderInterval = Number(window.localStorage.getItem(TOKEN_REMINDER_INTERVAL_STORAGE_KEY));
           if (Number.isFinite(storedReminderInterval) && storedReminderInterval >= 1) {
@@ -4072,7 +4081,11 @@ export function renderHtml() {
             scheduleTokenRefresh();
             return;
           }
-          void refreshTokenSessions("Token 定时刷新完成");
+          void refreshTokenSessions({
+            trigger: "scheduled",
+            okMessage: "Token 定时检查完成",
+            intervalSeconds: appState.tokenRefreshIntervalSeconds,
+          });
         }, appState.tokenRefreshIntervalSeconds * 1000);
       }
 
@@ -5718,21 +5731,65 @@ export function renderHtml() {
         }
       }
 
-      async function refreshTokenSessions(okMessage = "Token 刷新完成") {
+      function formatTokenRefreshOutcome(result, okMessage) {
+        const checkedCount = Number.isFinite(result?.checkedCount) ? result.checkedCount : 0;
+        const refreshedCount = Number.isFinite(result?.refreshedCount) ? result.refreshedCount : 0;
+        const skippedTooEarlyCount = Number.isFinite(result?.skippedTooEarlyCount) ? result.skippedTooEarlyCount : 0;
+        const skippedCooldownCount = Number.isFinite(result?.skippedCooldownCount) ? result.skippedCooldownCount : 0;
+        const failedCount = Number.isFinite(result?.failedCount)
+          ? result.failedCount
+          : Array.isArray(result?.failedProfiles)
+            ? result.failedProfiles.length
+            : 0;
+
+        const details = [
+          "已检查 " + checkedCount + " 个账号",
+          "刷新 " + refreshedCount + " 个",
+        ];
+        if (skippedTooEarlyCount > 0) {
+          details.push(skippedTooEarlyCount + " 个未进入刷新窗口");
+        }
+        if (skippedCooldownCount > 0) {
+          details.push(skippedCooldownCount + " 个冷却中");
+        }
+        if (failedCount > 0) {
+          details.push(failedCount + " 个失败");
+        }
+        return okMessage + "：" + details.join("，");
+      }
+
+      async function refreshTokenSessions(options = {}) {
+        const trigger = options.trigger === "scheduled" ? "scheduled" : "manual";
+        const okMessage = typeof options.okMessage === "string" && options.okMessage.trim()
+          ? options.okMessage.trim()
+          : trigger === "scheduled"
+            ? "Token 定时检查完成"
+            : "Token 检查完成";
         clearTokenRefreshTimer();
-        setBusy(true, "正在刷新 Token 有效期...", "info");
+        setBusy(true, "正在检查 Token 有效期...", "info");
         try {
-          const result = await postJson("/api/keepalive/run");
+          const result = await postJson("/api/keepalive/run", {
+            trigger,
+            intervalSeconds: trigger === "scheduled"
+              ? normalizeTokenRefreshIntervalSeconds(options.intervalSeconds || appState.tokenRefreshIntervalSeconds)
+              : undefined,
+          });
           if (result.state) {
             render(result.state);
           } else {
             render(await loadStateData());
           }
-          const failedCount = Array.isArray(result.failedProfiles) ? result.failedProfiles.length : 0;
+          const failedCount = Number.isFinite(result.failedCount)
+            ? result.failedCount
+            : Array.isArray(result.failedProfiles)
+              ? result.failedProfiles.length
+              : 0;
           if (failedCount > 0) {
-            setBusy(false, okMessage + "，但有 " + failedCount + " 个账号失败", "warn");
+            setBusy(false, formatTokenRefreshOutcome(result, okMessage), "warn");
+          } else if ((result?.refreshedCount || 0) > 0) {
+            setBusy(false, formatTokenRefreshOutcome(result, okMessage), "success");
           } else {
-            setBusy(false, okMessage, "success");
+            setBusy(false, formatTokenRefreshOutcome(result, okMessage), "info");
           }
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
@@ -6259,12 +6316,12 @@ export function renderHtml() {
       });
 
       tokenRefreshIntervalInput.addEventListener("change", () => {
-        const nextInterval = Math.max(0, Math.floor(Number(tokenRefreshIntervalInput.value) || 0));
+        const nextInterval = normalizeTokenRefreshIntervalSeconds(tokenRefreshIntervalInput.value);
         appState.tokenRefreshIntervalSeconds = nextInterval;
         syncAutomationControls();
         persistAutomationSettings();
         scheduleTokenRefresh();
-        setFlash(nextInterval > 0 ? "已设置每 " + nextInterval + " 秒定时刷新 Token" : "已关闭 Token 定时刷新", "info");
+        setFlash(nextInterval > 0 ? "已设置每 " + nextInterval + " 秒定时检查 Token" : "已关闭 Token 定时刷新", "info");
       });
 
       tokenReminderEnabledToggle.addEventListener("change", () => {
@@ -6483,7 +6540,7 @@ export function renderHtml() {
         void refreshState({ promptDuplicateCleanup: true });
       });
       tokenRefreshButton.addEventListener("click", () => {
-        void refreshTokenSessions();
+        void refreshTokenSessions({ trigger: "manual", okMessage: "Token 检查完成" });
       });
       applyButton.addEventListener("click", () => {
         void applyRecommendedOrder();

@@ -140,7 +140,11 @@ export async function startDashboardServer(options = {}) {
 
       if (request.method === "POST" && url.pathname === "/api/keepalive/run") {
         const body = await readBody(request);
-        sendJson(response, 200, await runTokenKeepalive(options, createStateDeps(url, body)));
+        sendJson(response, 200, await runTokenKeepalive(options, {
+          ...createStateDeps(url, body),
+          trigger: body.trigger,
+          intervalSeconds: body.intervalSeconds,
+        }));
         return;
       }
 

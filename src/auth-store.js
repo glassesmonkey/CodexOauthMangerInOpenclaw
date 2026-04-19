@@ -14,6 +14,29 @@ function asStringArray(value) {
     : [];
 }
 
+function normalizeIsoStringMap(value) {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const result = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof key !== "string" || !key.trim()) {
+      continue;
+    }
+    if (typeof entry !== "string" || !entry.trim()) {
+      continue;
+    }
+    const parsed = Date.parse(entry);
+    if (!Number.isFinite(parsed)) {
+      continue;
+    }
+    result[key] = new Date(parsed).toISOString();
+  }
+
+  return result;
+}
+
 function normalizeOrderRecord(value) {
   if (!isRecord(value)) {
     return undefined;
@@ -85,9 +108,16 @@ function normalizeMaintenance(value) {
       ? value.lastError
       : null,
     lastChangedProfileIds: changedProfileIds,
+    lastRefreshByProfileId: normalizeIsoStringMap(value.lastRefreshByProfileId),
   };
 
-  if (!maintenance.lastAttemptAt && !maintenance.lastSuccessAt && !maintenance.lastError && changedProfileIds.length === 0) {
+  if (
+    !maintenance.lastAttemptAt
+    && !maintenance.lastSuccessAt
+    && !maintenance.lastError
+    && changedProfileIds.length === 0
+    && Object.keys(maintenance.lastRefreshByProfileId).length === 0
+  ) {
     return undefined;
   }
 
