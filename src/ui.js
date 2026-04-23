@@ -2854,9 +2854,10 @@ export function renderHtml() {
                   <div class="modal-actions">
                     <button id="cloudConfigSaveButton" class="button-primary" type="button">保存配置</button>
                     <button id="cloudHealthCheckButton" class="button-secondary" type="button">测试连接</button>
-                    <button id="cloudBootstrapButton" class="button-secondary" type="button">把本地推到 D1</button>
-                    <button id="cloudPullButton" class="button-secondary" type="button">从 D1 拉到本地</button>
+                    <button id="cloudBootstrapButton" class="button-danger" type="button">用本地快照重置 D1（覆盖）</button>
+                    <button id="cloudPullButton" class="button-danger" type="button">从 D1 拉取（覆盖本地 order/meta）</button>
                   </div>
+                  <p class="field-note">平日的增删改 / 刷新会自动同步，上面两个按钮是个别账号池与 D1 发生未消解分歧时的灾难恢复，点前会弹框提示。</p>
                   <div id="cloudConfigStatus" class="field-note">-</div>
                 </div>
               </section>
@@ -6608,26 +6609,48 @@ export function renderHtml() {
       }
 
       async function bootstrapCloud() {
+        const confirmMessage = [
+          "即将用本机快照覆盖 D1：",
+          "· D1 上所有 profile / order / lastGood / usageStats / maintenance 会先被删光，然后写入本地当前的内容。",
+          "· 其它设备在本机上次同步后推到 D1 的改动会被覆盖掉。",
+          "",
+          "仅在你确定本机的快照才是可信的一份时使用。继续吗？",
+        ].join("\n");
+        if (!window.confirm(confirmMessage)) {
+          setCloudStatus("已取消重置", "info");
+          return;
+        }
         try {
-          setCloudStatus("正在把本地 store 推送到 D1…", "info");
+          setCloudStatus("正在用本地快照重置 D1…", "info");
           const response = await fetch("/api/d1/bootstrap", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
           const json = await response.json();
           if (!response.ok) throw new Error(json.error || ("HTTP " + response.status));
           applyCloudConfigSnapshot(json.config);
-          setCloudStatus("已推送 " + (json.statementCount || 0) + " 条 SQL 到 D1", "success");
+          setCloudStatus("已用本地快照重置 D1 · " + (json.statementCount || 0) + " 条 SQL", "success");
         } catch (error) {
-          setCloudStatus("推送失败: " + (error instanceof Error ? error.message : String(error)), "error");
+          setCloudStatus("重置失败: " + (error instanceof Error ? error.message : String(error)), "error");
         }
       }
 
       async function pullCloud() {
+        const confirmMessage = [
+          "即将从 D1 拉取 snapshot 回本地：",
+          "· profile 会按“expires 更晚的一边赢”合并，本地上次刷新出来的新 token 不会丢。",
+          "· order / lastGood / usageStats / maintenance 会被 D1 的版本硬覆盖。如果你刚在本机改过顺序，会被覆盖。",
+          "",
+          "继续吗？",
+        ].join("\n");
+        if (!window.confirm(confirmMessage)) {
+          setCloudStatus("已取消拉取", "info");
+          return;
+        }
         try {
           setCloudStatus("正在从 D1 拉取…", "info");
           const response = await fetch("/api/d1/pull", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
           const json = await response.json();
           if (!response.ok) throw new Error(json.error || ("HTTP " + response.status));
           applyCloudConfigSnapshot(json.config);
-          setCloudStatus("已从 D1 拉取 " + (json.pulledProfileCount || 0) + " 条 profile。访问页面别的 tab 会看到最新数据。", "success");
+          setCloudStatus("已从 D1 拉取 " + (json.pulledProfileCount || 0) + " 条 profile；order/meta 使用 D1 版本。", "success");
           void refreshData();
         } catch (error) {
           setCloudStatus("拉取失败: " + (error instanceof Error ? error.message : String(error)), "error");

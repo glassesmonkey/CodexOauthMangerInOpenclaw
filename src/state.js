@@ -1165,12 +1165,13 @@ async function exportRuntimeFromLocal(options, store, exportOptions = {}) {
   }
 
   // Best-effort sync of the canonical local store to the cloud backend when
-  // cloud mode is enabled. Failures are swallowed — the local write has
-  // already succeeded and the dashboard keeps functioning; the UI surfaces
-  // the last cloud sync status via /api/config/store.
+  // cloud mode is enabled. We intentionally upsert (NOT replace) so this
+  // device cannot wipe out rows another device has written in the window
+  // between the last pull and this local mutation. Deletes flow through
+  // explicit deleteCloudProfiles calls in the delete paths instead.
   if (exportOptions.skipCloudSync !== true) {
     try {
-      const result = await syncLocalStoreToCloud(options, store, { replace: true });
+      const result = await syncLocalStoreToCloud(options, store, { replace: false });
       if (!result.skipped && result.error) {
         lastCloudSyncError = {
           at: new Date().toISOString(),
@@ -2164,6 +2165,8 @@ export async function deleteProfiles(options, profileIds, deps = {}) {
     preferredProfileId: selectedProfileId,
     codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
   });
+  // Propagate the removal to D1 as well; offline mode no-ops.
+  await deleteCloudProfiles(options, profileIds);
   return await loadDashboardState(options, deps);
 }
 
@@ -2303,6 +2306,19 @@ export async function previewImportBundle(options, request = {}, deps = {}) {
   };
 }
 
+function collectCleanupRemovedProfileIds(actions) {
+  if (!Array.isArray(actions)) {
+    return [];
+  }
+  const removed = new Set();
+  for (const action of actions) {
+    if (action?.type === "cleanup-duplicate" && typeof action.sourceProfileId === "string" && action.sourceProfileId.trim()) {
+      removed.add(action.sourceProfileId.trim());
+    }
+  }
+  return [...removed];
+}
+
 export async function commitImportBundle(options, request = {}, deps = {}) {
   const context = resolvePaths(options);
   const imported = readEncryptedExportBundle(request.bundle, request.passphrase);
@@ -2320,6 +2336,13 @@ export async function commitImportBundle(options, request = {}, deps = {}) {
     preferredProfileId: selectedProfileId,
     codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
   });
+
+  // Import may have merged duplicates away locally; make sure D1 follows the
+  // same removals so we don't resurrect them on the next pull.
+  const removedByImport = collectCleanupRemovedProfileIds(preview.actions);
+  if (removedByImport.length > 0) {
+    await deleteCloudProfiles(options, removedByImport);
+  }
 
   return await loadDashboardState(options, deps);
 }
@@ -2350,6 +2373,14 @@ export async function cleanupDuplicateProfiles(options, deps = {}) {
     preferredProfileId: selectedProfileId,
     codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
   });
+
+  // Dedup removed the `sourceProfileId` side of each group; mirror those
+  // removals to D1 so the cleanup isn't silently undone by the full-store
+  // upsert or the next pull.
+  const removedIds = collectCleanupRemovedProfileIds(normalized.actions);
+  if (removedIds.length > 0) {
+    await deleteCloudProfiles(options, removedIds);
+  }
 
   return {
     summary: normalized.summary,

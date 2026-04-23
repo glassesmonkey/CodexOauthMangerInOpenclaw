@@ -22,7 +22,13 @@ import {
   serializeCredentialForRemote,
   StoreCryptoError,
 } from "../src/store-crypto.js";
-import { runTokenKeepalive } from "../src/state.js";
+import {
+  cleanupDuplicateProfiles,
+  deleteProfile,
+  deleteProfiles,
+  runTokenKeepalive,
+  saveLoggedInProfile,
+} from "../src/state.js";
 import { MockD1 } from "./support/mock-d1.js";
 
 function setupStateDir(prefix) {
@@ -265,6 +271,251 @@ test("runTokenKeepalive in cloud mode skips profiles whose lease is held by anot
     } finally {
       globalThis.fetch = originalFetch;
     }
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+// Shared harness for state.js cloud-mode tests: configures cloud mode and
+// hijacks globalThis.fetch to route to the MockD1 instance.
+function runWithCloudMock(mock, localStateDir, work) {
+  configureCloudMode(localStateDir, mock);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = mock.fetchImpl.bind(mock);
+  return Promise.resolve(work()).finally(() => {
+    globalThis.fetch = originalFetch;
+  });
+}
+
+test("cloud-mode writes upsert local profiles into D1 without wiping remote-only rows", async () => {
+  const { stateDir, localStateDir, codexAuthPath } = setupStateDir("codex-dashboard-cloud-upsert-");
+  try {
+    writeInitialStore(stateDir, {
+      "openai-codex:local-one": buildOauthProfile({
+        access: "local-access-1",
+        refresh: "local-refresh-1",
+        expires: Date.now() + 60_000,
+        email: "local@example.com",
+      }),
+    }, ["openai-codex:local-one"]);
+
+    const mock = new MockD1();
+    // Pretend another device already pushed a second profile to D1. The
+    // local store on THIS device has no knowledge of it.
+    mock.profiles.set("openai-codex:other-device", {
+      provider: "openai-codex",
+      email: "other@example.com",
+      chatgpt_user_id: null,
+      account_id: null,
+      expires_at: Date.now() + 120_000,
+      credential_blob: JSON.stringify({ type: "oauth", refresh: "other-refresh" }),
+      credential_blob_iv: null,
+      credential_blob_salt: null,
+      is_encrypted: 0,
+      version: 1,
+      updated_at: Date.now(),
+      updated_by: "other-device",
+    });
+
+    await runWithCloudMock(mock, localStateDir, async () => {
+      // Save a brand-new profile through a normal write path (login save).
+      await saveLoggedInProfile(
+        { stateDir, localStateDir, agent: "main", codexAuthPath },
+        "openai-codex:new-local",
+        {
+          access: "new-access",
+          refresh: "new-refresh",
+          expires: Date.now() + 60_000,
+          accountId: "acc-new",
+          email: "new@example.com",
+          authMode: "chatgpt",
+          idToken: "new-id-token",
+          lastRefresh: new Date().toISOString(),
+        },
+      );
+    });
+
+    const snapshot = mock.snapshot();
+    const ids = snapshot.profiles.map((row) => row.id).sort();
+    assert.ok(ids.includes("openai-codex:other-device"), "must not have wiped the other device's profile");
+    assert.ok(ids.includes("openai-codex:new-local"), "new local profile should have been upserted");
+    assert.ok(ids.includes("openai-codex:local-one"), "existing local profile should still be present in D1");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("deleteProfile in cloud mode removes the row from D1", async () => {
+  const { stateDir, localStateDir, codexAuthPath } = setupStateDir("codex-dashboard-cloud-delete-");
+  try {
+    writeInitialStore(stateDir, {
+      "openai-codex:keeper": buildOauthProfile({
+        access: "keeper-access",
+        refresh: "keeper-refresh",
+        expires: Date.now() + 60_000,
+        email: "keeper@example.com",
+      }),
+      "openai-codex:goner": buildOauthProfile({
+        access: "goner-access",
+        refresh: "goner-refresh",
+        expires: Date.now() + 60_000,
+        email: "goner@example.com",
+      }),
+    }, ["openai-codex:keeper", "openai-codex:goner"]);
+
+    const mock = new MockD1();
+    // Preload both rows as if a previous sync wrote them.
+    for (const id of ["openai-codex:keeper", "openai-codex:goner"]) {
+      mock.profiles.set(id, {
+        provider: "openai-codex",
+        email: `${id}@example.com`,
+        chatgpt_user_id: null,
+        account_id: null,
+        expires_at: Date.now() + 60_000,
+        credential_blob: JSON.stringify({ type: "oauth", refresh: `${id}-refresh` }),
+        credential_blob_iv: null,
+        credential_blob_salt: null,
+        is_encrypted: 0,
+        version: 1,
+        updated_at: Date.now(),
+        updated_by: "test-seed",
+      });
+    }
+
+    await runWithCloudMock(mock, localStateDir, async () => {
+      await deleteProfile(
+        { stateDir, localStateDir, agent: "main", codexAuthPath },
+        "openai-codex:goner",
+      );
+    });
+
+    assert.equal(mock.profiles.has("openai-codex:goner"), false, "deleted profile must be gone from D1");
+    assert.equal(mock.profiles.has("openai-codex:keeper"), true, "kept profile must remain in D1");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("cleanupDuplicateProfiles in cloud mode removes merged-away source IDs from D1", async () => {
+  const { stateDir, localStateDir, codexAuthPath } = setupStateDir("codex-dashboard-cloud-cleanup-");
+  try {
+    // Two profile rows sharing the same identity (same access JWT / chatgpt_user_id):
+    // the cleanup logic merges them into one and removes the other.
+    const sharedAccessJwt = [
+      Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url"),
+      Buffer.from(JSON.stringify({
+        sub: "auth0|shared",
+        "https://api.openai.com/auth": { chatgpt_user_id: "user-shared" },
+        "https://api.openai.com/profile": { email: "shared@example.com" },
+      })).toString("base64url"),
+      "sig",
+    ].join(".");
+
+    writeInitialStore(stateDir, {
+      "openai-codex:primary": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: sharedAccessJwt,
+        refresh: "primary-refresh",
+        expires: Date.now() + 120_000,
+        accountId: "acc-shared",
+        email: "shared@example.com",
+        codexAuth: { authMode: "chatgpt", idToken: sharedAccessJwt, lastRefresh: "2026-04-01T00:00:00Z" },
+      },
+      "openai-codex:duplicate": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: sharedAccessJwt,
+        refresh: "duplicate-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "acc-shared",
+        email: "shared@example.com",
+        codexAuth: { authMode: "chatgpt", idToken: sharedAccessJwt, lastRefresh: "2026-04-01T00:00:00Z" },
+      },
+    }, ["openai-codex:primary", "openai-codex:duplicate"]);
+
+    const mock = new MockD1();
+    // Preload both rows as if a prior sync put them there; cleanup must drop
+    // the `sourceProfileId` side (whichever the dedup picks as duplicate).
+    for (const id of ["openai-codex:primary", "openai-codex:duplicate"]) {
+      mock.profiles.set(id, {
+        provider: "openai-codex",
+        email: "shared@example.com",
+        chatgpt_user_id: "user-shared",
+        account_id: "acc-shared",
+        expires_at: Date.now() + 60_000,
+        credential_blob: JSON.stringify({ type: "oauth", refresh: `${id}-refresh` }),
+        credential_blob_iv: null,
+        credential_blob_salt: null,
+        is_encrypted: 0,
+        version: 1,
+        updated_at: Date.now(),
+        updated_by: "test-seed",
+      });
+    }
+
+    const result = await runWithCloudMock(mock, localStateDir, async () => {
+      return await cleanupDuplicateProfiles(
+        { stateDir, localStateDir, agent: "main", codexAuthPath },
+      );
+    });
+
+    const cleanupActions = result.actions.filter((action) => action.type === "cleanup-duplicate");
+    assert.ok(cleanupActions.length > 0, "cleanup should have produced at least one merge action");
+    for (const action of cleanupActions) {
+      assert.equal(
+        mock.profiles.has(action.sourceProfileId),
+        false,
+        `merged-away profile ${action.sourceProfileId} must be removed from D1`,
+      );
+      assert.equal(
+        mock.profiles.has(action.targetProfileId),
+        true,
+        `canonical profile ${action.targetProfileId} must remain in D1`,
+      );
+    }
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("deleteProfiles (bulk) in cloud mode removes all requested rows from D1", async () => {
+  const { stateDir, localStateDir, codexAuthPath } = setupStateDir("codex-dashboard-cloud-bulk-delete-");
+  try {
+    writeInitialStore(stateDir, {
+      "openai-codex:a": buildOauthProfile({ access: "a", refresh: "a-r", expires: Date.now() + 60_000, email: "a@x" }),
+      "openai-codex:b": buildOauthProfile({ access: "b", refresh: "b-r", expires: Date.now() + 60_000, email: "b@x" }),
+      "openai-codex:c": buildOauthProfile({ access: "c", refresh: "c-r", expires: Date.now() + 60_000, email: "c@x" }),
+    }, ["openai-codex:a", "openai-codex:b", "openai-codex:c"]);
+
+    const mock = new MockD1();
+    for (const id of ["openai-codex:a", "openai-codex:b", "openai-codex:c"]) {
+      mock.profiles.set(id, {
+        provider: "openai-codex",
+        email: `${id}@x`,
+        chatgpt_user_id: null,
+        account_id: null,
+        expires_at: Date.now() + 60_000,
+        credential_blob: JSON.stringify({ type: "oauth", refresh: `${id}-r` }),
+        credential_blob_iv: null,
+        credential_blob_salt: null,
+        is_encrypted: 0,
+        version: 1,
+        updated_at: Date.now(),
+        updated_by: "seed",
+      });
+    }
+
+    await runWithCloudMock(mock, localStateDir, async () => {
+      await deleteProfiles(
+        { stateDir, localStateDir, agent: "main", codexAuthPath },
+        ["openai-codex:a", "openai-codex:c"],
+      );
+    });
+
+    assert.equal(mock.profiles.has("openai-codex:a"), false);
+    assert.equal(mock.profiles.has("openai-codex:b"), true);
+    assert.equal(mock.profiles.has("openai-codex:c"), false);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
