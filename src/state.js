@@ -2199,7 +2199,6 @@ async function refreshLocalStoreFromCloud(options, { mode = "canonical" } = {}) 
   replaceKnownCloudProfileIds(options, Object.keys(remote.profiles || {}));
   return nextStore;
 }
-
 export function runTokenKeepalive(options, deps = {}) {
   const context = resolvePaths(options);
   const key = context.localAuthStorePath;
