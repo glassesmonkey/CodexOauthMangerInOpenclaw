@@ -1805,7 +1805,15 @@ export async function applyOrder(options, order, deps = {}) {
   return applyResult ? { ...state, applyResult } : state;
 }
 
-export async function runTokenKeepalive(options, deps = {}) {
+// In-flight keepalive runs keyed by the resolved local store path. Concurrent
+// callers (manual click racing with scheduled timer, double-submitted clicks,
+// etc.) share the same promise instead of each issuing their own refresh
+// request for the same credential — otherwise the first request rotates the
+// refresh_token on OpenAI's side and the second one fails with 401
+// refresh_token_reused.
+const activeKeepaliveByStorePath = new Map();
+
+async function doRunTokenKeepalive(options, deps = {}) {
   const context = resolvePaths(options);
   ensureLocalStoreInitialized(context);
   const configOrder = context.configExists ? getConfigCodexOrder(readOpenClawConfig(context.configPath)) : [];
@@ -1908,6 +1916,25 @@ export async function runTokenKeepalive(options, deps = {}) {
     exportedRuntime,
     state: await loadDashboardState(options, deps),
   };
+}
+
+export function runTokenKeepalive(options, deps = {}) {
+  const context = resolvePaths(options);
+  const key = context.localAuthStorePath;
+  const existing = activeKeepaliveByStorePath.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const pending = (async () => {
+    try {
+      return await doRunTokenKeepalive(options, deps);
+    } finally {
+      activeKeepaliveByStorePath.delete(key);
+    }
+  })();
+  activeKeepaliveByStorePath.set(key, pending);
+  return pending;
 }
 
 export async function switchProfile(options, profileId, deps = {}) {

@@ -3242,6 +3242,137 @@ test("runTokenKeepalive preserves unrelated runtime entries while refreshing cod
   }
 });
 
+test("resolveCredentialToken surfaces OpenAI OAuth error detail when refresh fails", async () => {
+  const credential = {
+    type: "oauth",
+    provider: "openai-codex",
+    access: "stale-access",
+    refresh: "stale-refresh",
+    expires: Date.now() - 10_000,
+    email: "seat@example.com",
+  };
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        error: {
+          message: "Your refresh token has already been used to generate a new access token. Please try signing in again.",
+          type: "invalid_request_error",
+          code: "refresh_token_reused",
+        },
+      }),
+      { status: 401, statusText: "Unauthorized", headers: { "content-type": "application/json" } },
+    );
+
+  try {
+    await assert.rejects(
+      () => resolveCredentialToken(credential, { proxyConfig: { enabled: false } }),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /Failed to refresh OpenAI Codex token/);
+        assert.match(error.message, /HTTP 401/);
+        assert.match(error.message, /refresh_token_reused/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("runTokenKeepalive dedupes concurrent runs against the same store", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-keepalive-singleton-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const refreshCalls = [];
+  let refreshResolvers = [];
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      "openai-codex:seat-a": createOauthProfile({
+        access: "seat-a-access",
+        refresh: "seat-a-refresh",
+        accountId: "account-shared",
+        email: "seat-a@example.com",
+        expires: Date.now() - 1_000,
+      }),
+      "openai-codex:seat-b": createOauthProfile({
+        access: "seat-b-access",
+        refresh: "seat-b-refresh",
+        accountId: "account-shared",
+        email: "seat-b@example.com",
+        expires: Date.now() - 1_000,
+      }),
+    },
+    order: {
+      "openai-codex": ["openai-codex:seat-a", "openai-codex:seat-b"],
+    },
+  });
+
+  const refreshImpl = async (refreshToken) => {
+    refreshCalls.push(refreshToken);
+    await new Promise((resolve) => {
+      refreshResolvers.push(resolve);
+    });
+    return {
+      access: `next-${refreshToken}`,
+      refresh: `next-${refreshToken}`,
+      expires: Date.now() + 60_000,
+    };
+  };
+
+  try {
+    const first = runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      { refreshImpl },
+    );
+    // While the first run is mid-flight (waiting on refreshImpl), a second
+    // caller should piggy-back on the same promise instead of issuing a
+    // duplicate refresh that would race and hit refresh_token_reused.
+    const second = runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      { refreshImpl },
+    );
+    assert.equal(first, second, "concurrent keepalive calls should share one in-flight promise");
+
+    // Drain pending refresh awaiters so the run can finish.
+    while (refreshResolvers.length > 0 || refreshCalls.length < 2) {
+      if (refreshResolvers.length > 0) {
+        refreshResolvers.shift()();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const result = await first;
+    assert.equal(result.refreshedCount, 2);
+    assert.deepEqual(refreshCalls.sort(), ["seat-a-refresh", "seat-b-refresh"]);
+
+    // After the first run resolves, a new invocation should actually run again
+    // (not return the cached promise).
+    const third = runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      { refreshImpl },
+    );
+    assert.notEqual(first, third, "keepalive should run fresh once no run is in flight");
+    // Unblock the in-flight refreshes for the third run so it can complete.
+    while (refreshResolvers.length > 0 || refreshCalls.length < 2) {
+      if (refreshResolvers.length > 0) {
+        refreshResolvers.shift()();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await third;
+  } finally {
+    // Drain anything still parked to avoid leaking pending promises across tests.
+    for (const resolve of refreshResolvers) {
+      try { resolve(); } catch { /* ignore */ }
+    }
+    refreshResolvers = [];
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("openBrowser tolerates missing open command", async () => {
   const warnings = [];
 
