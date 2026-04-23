@@ -79,6 +79,19 @@ import {
 } from "./session-store.js";
 import { loadUsageRefreshBatch } from "./usage-refresh.js";
 import { dedupeStrings, isRecord, toErrorMessage } from "./utils.js";
+import {
+  bootstrapCloudFromLocal,
+  checkCloudHealth,
+  deleteCloudProfiles,
+  isCloudMode,
+  loadCloudContext,
+  pullCloudStore,
+  pushProfileCloudUpdate,
+  pushMetaCloudUpdate,
+  syncLocalStoreToCloud,
+  withRefreshLease,
+} from "./cloud-gate.js";
+import { loadDashboardConfig, saveDashboardConfig, summarizeDashboardConfigForClient } from "./dashboard-config.js";
 
 function resolveAccountId(credential) {
   if (typeof credential?.accountId === "string" && credential.accountId.trim()) {
@@ -1150,6 +1163,37 @@ async function exportRuntimeFromLocal(options, store, exportOptions = {}) {
   if (exportOptions.codexCredential && isCodexCompatibleCredential(exportOptions.codexCredential)) {
     await writeCodexSelection(options, exportOptions.codexCredential);
   }
+
+  // Best-effort sync of the canonical local store to the cloud backend when
+  // cloud mode is enabled. We intentionally upsert (NOT replace) so this
+  // device cannot wipe out rows another device has written in the window
+  // between the last pull and this local mutation. Deletes flow through
+  // explicit deleteCloudProfiles calls in the delete paths instead.
+  if (exportOptions.skipCloudSync !== true) {
+    try {
+      const result = await syncLocalStoreToCloud(options, store, { replace: false });
+      if (!result.skipped && result.error) {
+        lastCloudSyncError = {
+          at: new Date().toISOString(),
+          error: result.error,
+        };
+      } else if (!result.skipped) {
+        mergeKnownCloudProfileIds(options, Object.keys(store.profiles || {}));
+        lastCloudSyncError = null;
+      }
+    } catch (error) {
+      lastCloudSyncError = {
+        at: new Date().toISOString(),
+        error: toErrorMessage(error),
+      };
+    }
+  }
+}
+
+let lastCloudSyncError = null;
+
+export function getLastCloudSyncError() {
+  return lastCloudSyncError;
 }
 
 function mergeRefreshedCredential(existing, incoming) {
@@ -1158,6 +1202,52 @@ function mergeRefreshedCredential(existing, incoming) {
     ...incoming,
     codexAuth: incoming.codexAuth ?? existing.codexAuth,
   };
+}
+
+function hasAnyStoreData(store) {
+  if (!store || !isRecord(store)) {
+    return false;
+  }
+  return Object.keys(store.profiles || {}).length > 0
+    || Object.keys(store.order || {}).length > 0
+    || Object.keys(store.lastGood || {}).length > 0
+    || Object.keys(store.usageStats || {}).length > 0
+    || Object.keys(store.maintenance || {}).length > 0;
+}
+
+function getKnownCloudProfileIds(options) {
+  return loadDashboardConfig(options).cloudKnownProfileIds ?? [];
+}
+
+function replaceKnownCloudProfileIds(options, profileIds) {
+  saveDashboardConfig(options, {
+    cloudKnownProfileIds: dedupeStrings(
+      Array.isArray(profileIds) ? profileIds.filter((entry) => typeof entry === "string") : [],
+    ),
+  });
+}
+
+function mergeKnownCloudProfileIds(options, profileIds) {
+  const known = getKnownCloudProfileIds(options);
+  replaceKnownCloudProfileIds(options, [
+    ...known,
+    ...(Array.isArray(profileIds) ? profileIds : []),
+  ]);
+}
+
+function forgetKnownCloudProfileIds(options, profileIds) {
+  const removals = new Set(
+    Array.isArray(profileIds)
+      ? profileIds.filter((entry) => typeof entry === "string" && entry.trim())
+      : [],
+  );
+  if (removals.size === 0) {
+    return;
+  }
+  replaceKnownCloudProfileIds(
+    options,
+    getKnownCloudProfileIds(options).filter((profileId) => !removals.has(profileId)),
+  );
 }
 
 function mergeDefinedRecord(primary, secondary) {
@@ -1738,6 +1828,7 @@ export async function loadTokenExpirySnapshot(options = {}) {
 
 export async function applyOrder(options, order, deps = {}) {
   const context = resolvePaths(options);
+  await refreshLocalStoreFromCloud(options);
   const updatedStore = await updateAuthStore(options, (store) => applyOrderToAuthStore(store, order));
   const preferredOrder = getStoredOrder(updatedStore);
   const preferredProfileId = preferredOrder[0] || null;
@@ -1823,10 +1914,27 @@ async function doRunTokenKeepalive(options, deps = {}) {
   const scheduledIntervalSeconds = getKeepaliveScheduledIntervalSeconds(trigger, deps.intervalSeconds);
   const failedProfiles = [];
   const changedProfileIds = [];
+  const leaseSkippedProfiles = [];
   let checkedCount = 0;
   let skippedTooEarlyCount = 0;
   let skippedCooldownCount = 0;
+  let skippedLeaseCount = 0;
   let exportedRuntime = false;
+
+  // In cloud mode, pull the latest D1 snapshot first so the local store picks
+  // up any credentials that another device rotated since we last wrote. We
+  // prefer whichever side has the later `expires` per profile.
+  const cloudContext = await loadCloudContext(options);
+  const cloudEnabled = Boolean(cloudContext.client);
+  let cloudPrePullError = null;
+  if (cloudEnabled) {
+    try {
+      const remote = await pullCloudStore(options);
+      await updateAuthStore(options, (localStore) => mergeRemoteIntoLocal(localStore, remote));
+    } catch (error) {
+      cloudPrePullError = toErrorMessage(error);
+    }
+  }
 
   const nextStore = buildLocalAuthStore(readLocalAuthStore(context));
   const maintenance = buildMaintenanceSummary(nextStore);
@@ -1855,8 +1963,8 @@ async function doRunTokenKeepalive(options, deps = {}) {
       continue;
     }
 
-    try {
-      const resolved = deps.refreshImpl
+    const performRefresh = async () => {
+      return deps.refreshImpl
         ? await resolveCredentialToken(entry.credential, {
           proxyConfig: deps.proxyConfig,
           forceRefresh: true,
@@ -1866,11 +1974,27 @@ async function doRunTokenKeepalive(options, deps = {}) {
           proxyConfig: deps.proxyConfig,
           forceRefresh: true,
         });
+    };
 
+    try {
+      const leaseOutcome = await withRefreshLease(options, entry.profileId, performRefresh, { ttlMs: 30_000 });
+      if (!leaseOutcome.ran) {
+        skippedLeaseCount += 1;
+        leaseSkippedProfiles.push(entry.profileId);
+        continue;
+      }
+      const resolved = leaseOutcome.result;
       if (resolved.updated) {
         nextStore.profiles[entry.profileId] = mergeRefreshedCredential(nextStore.profiles[entry.profileId], resolved.credential);
         changedProfileIds.push(entry.profileId);
         lastRefreshByProfileId[entry.profileId] = attemptedAt;
+
+        // Push the single refreshed profile upstream immediately so sibling
+        // devices see the new refresh_token without waiting for the trailing
+        // full-store sync at the end of this run.
+        if (cloudEnabled) {
+          await pushProfileCloudUpdate(options, entry.profileId, nextStore.profiles[entry.profileId]);
+        }
       }
     } catch (error) {
       failedProfiles.push({
@@ -1900,6 +2024,10 @@ async function doRunTokenKeepalive(options, deps = {}) {
       codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
     });
     exportedRuntime = true;
+  } else if (cloudEnabled) {
+    // Maintenance meta moved even though no credentials changed; make sure
+    // the other devices see the updated lastAttemptAt / lastError.
+    await pushMetaCloudUpdate(options, "maintenance", finalStore.maintenance ?? null);
   }
 
   return {
@@ -1910,14 +2038,167 @@ async function doRunTokenKeepalive(options, deps = {}) {
     refreshedCount: changedProfileIds.length,
     skippedTooEarlyCount,
     skippedCooldownCount,
+    skippedLeaseCount,
     failedCount: failedProfiles.length,
     changedProfileIds,
     failedProfiles,
+    leaseSkippedProfiles,
     exportedRuntime,
+    storeMode: cloudContext.config.storeMode,
+    cloudPrePullError,
     state: await loadDashboardState(options, deps),
   };
 }
 
+function mergeProfileByFreshestExpiry(localCredential, remoteCredential) {
+  if (!localCredential) {
+    return remoteCredential;
+  }
+  if (!remoteCredential) {
+    return localCredential;
+  }
+  const localExpires = resolveExpiresAt(localCredential) ?? 0;
+  const remoteExpires = resolveExpiresAt(remoteCredential) ?? 0;
+  return remoteExpires > localExpires
+    ? mergeRefreshedCredential(localCredential, remoteCredential)
+    : localCredential;
+}
+
+function mergeRemoteIntoLocal(localStore, remote) {
+  const merged = buildLocalAuthStore(localStore);
+  if (!remote) {
+    return merged;
+  }
+
+  const remoteProfiles = isRecord(remote.profiles) ? remote.profiles : {};
+  for (const [profileId, remoteCredential] of Object.entries(remoteProfiles)) {
+    merged.profiles[profileId] = mergeProfileByFreshestExpiry(
+      merged.profiles[profileId],
+      remoteCredential,
+    );
+  }
+
+  if (isRecord(remote.order)) {
+    merged.order = remote.order;
+  }
+  if (isRecord(remote.lastGood)) {
+    merged.lastGood = remote.lastGood;
+  }
+  if (isRecord(remote.usageStats)) {
+    merged.usageStats = remote.usageStats;
+  }
+  if (isRecord(remote.maintenance)) {
+    merged.maintenance = remote.maintenance;
+  }
+
+  return merged;
+}
+
+function buildMergedOrderWithLocalPriority(localStore, remoteStore, profiles) {
+  const existingIds = new Set(Object.keys(profiles || {}));
+  const localOrder = Array.isArray(localStore?.order?.[CODEX_PROVIDER])
+    ? localStore.order[CODEX_PROVIDER]
+    : [];
+  const remoteOrder = Array.isArray(remoteStore?.order?.[CODEX_PROVIDER])
+    ? remoteStore.order[CODEX_PROVIDER]
+    : [];
+  const mergedOrder = dedupeStrings([
+    ...localOrder,
+    ...remoteOrder,
+    ...Object.keys(profiles || {}),
+  ]).filter((profileId) => existingIds.has(profileId));
+
+  return mergedOrder.length > 0
+    ? {
+      [CODEX_PROVIDER]: mergedOrder,
+    }
+    : undefined;
+}
+
+function mergeUsageStatsWithLocalPriority(localUsageStats, remoteUsageStats) {
+  const merged = {
+    ...(isRecord(remoteUsageStats) ? remoteUsageStats : {}),
+    ...(isRecord(localUsageStats) ? localUsageStats : {}),
+  };
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function mergeMaintenanceWithLocalPriority(localMaintenance, remoteMaintenance) {
+  const seed = buildLocalAuthStore({
+    maintenance: isRecord(remoteMaintenance) ? remoteMaintenance : undefined,
+  });
+  return applyMaintenanceUpdate(seed, localMaintenance).maintenance;
+}
+
+function mergeRemoteIntoLocalPreservingLocalMeta(localStore, remote) {
+  const merged = mergeRemoteIntoLocal(localStore, remote);
+
+  merged.order = buildMergedOrderWithLocalPriority(localStore, remote, merged.profiles);
+
+  const localLastGood = localStore?.lastGood?.[CODEX_PROVIDER];
+  const remoteLastGood = remote?.lastGood?.[CODEX_PROVIDER];
+  if (typeof localLastGood === "string" && merged.profiles[localLastGood]) {
+    merged.lastGood = { [CODEX_PROVIDER]: localLastGood };
+  } else if (typeof remoteLastGood === "string" && merged.profiles[remoteLastGood]) {
+    merged.lastGood = { [CODEX_PROVIDER]: remoteLastGood };
+  } else {
+    merged.lastGood = undefined;
+  }
+
+  merged.usageStats = mergeUsageStatsWithLocalPriority(localStore?.usageStats, remote?.usageStats);
+  merged.maintenance = mergeMaintenanceWithLocalPriority(localStore?.maintenance, remote?.maintenance);
+
+  return merged;
+}
+
+function buildCloudCanonicalStore(localStore, remote, knownCloudProfileIds = []) {
+  const local = buildLocalAuthStore(localStore);
+  const remoteProfiles = isRecord(remote?.profiles) ? remote.profiles : {};
+  const knownIds = new Set(
+    Array.isArray(knownCloudProfileIds)
+      ? knownCloudProfileIds.filter((entry) => typeof entry === "string" && entry.trim())
+      : [],
+  );
+  const remoteHasData = hasAnyStoreData(remote);
+  if (!remoteHasData && knownIds.size === 0) {
+    return local;
+  }
+
+  const merged = buildLocalAuthStore(remoteHasData ? remote : {});
+  for (const [profileId, localCredential] of Object.entries(local.profiles)) {
+    if (remoteProfiles[profileId]) {
+      merged.profiles[profileId] = mergeProfileByFreshestExpiry(
+        localCredential,
+        remoteProfiles[profileId],
+      );
+      continue;
+    }
+    if (!knownIds.has(profileId)) {
+      merged.profiles[profileId] = localCredential;
+    }
+  }
+
+  return merged;
+}
+
+async function refreshLocalStoreFromCloud(options, { mode = "canonical" } = {}) {
+  const context = resolvePaths(options);
+  ensureLocalStoreInitialized(context);
+  const cloudContext = await loadCloudContext(options);
+  if (!cloudContext.client) {
+    return readLocalAuthStore(context);
+  }
+
+  const remote = await pullCloudStore(options);
+  const nextStore = await updateAuthStore(options, (localStore) => {
+    if (mode === "preserve-local-meta") {
+      return mergeRemoteIntoLocalPreservingLocalMeta(localStore, remote);
+    }
+    return buildCloudCanonicalStore(localStore, remote, getKnownCloudProfileIds(options));
+  });
+  replaceKnownCloudProfileIds(options, Object.keys(remote.profiles || {}));
+  return nextStore;
+}
 export function runTokenKeepalive(options, deps = {}) {
   const context = resolvePaths(options);
   const key = context.localAuthStorePath;
@@ -1939,7 +2220,7 @@ export function runTokenKeepalive(options, deps = {}) {
 
 export async function switchProfile(options, profileId, deps = {}) {
   const context = resolvePaths(options);
-  const store = readLocalAuthStore(context);
+  const store = await refreshLocalStoreFromCloud(options);
   const configOrder = context.configExists ? getConfigCodexOrder(readOpenClawConfig(context.configPath)) : [];
   const currentOrder = computeEffectiveOrder(store, configOrder);
   const credential = store.profiles[profileId];
@@ -1978,8 +2259,7 @@ export async function switchProfile(options, profileId, deps = {}) {
 }
 
 export async function switchCodexProfile(options, profileId, deps = {}) {
-  const context = resolvePaths(options);
-  const store = readLocalAuthStore(context);
+  const store = await refreshLocalStoreFromCloud(options);
   const credential = store.profiles[profileId];
 
   if (!credential) {
@@ -2021,6 +2301,7 @@ export async function syncConfig(options, deps = {}) {
 }
 
 export async function renameProfile(options, profileId, nextProfileId, deps = {}) {
+  await refreshLocalStoreFromCloud(options);
   const nextStore = await updateAuthStore(options, (store) => renameProfileInAuthStore(store, profileId, nextProfileId));
   const selectedProfileId = getSelectedProfileId(nextStore);
   const selectedCredential = selectedProfileId ? nextStore.profiles[selectedProfileId] : null;
@@ -2035,6 +2316,7 @@ export async function deleteProfile(options, profileId, deps = {}) {
 }
 
 export async function deleteProfiles(options, profileIds, deps = {}) {
+  await refreshLocalStoreFromCloud(options);
   const nextStore = await updateAuthStore(options, (store) => deleteProfilesFromAuthStore(store, profileIds));
   const selectedProfileId = getSelectedProfileId(nextStore);
   const selectedCredential = selectedProfileId ? nextStore.profiles[selectedProfileId] : null;
@@ -2042,6 +2324,11 @@ export async function deleteProfiles(options, profileIds, deps = {}) {
     preferredProfileId: selectedProfileId,
     codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
   });
+  // Propagate the removal to D1 as well; offline mode no-ops.
+  const deleteResult = await deleteCloudProfiles(options, profileIds);
+  if (!deleteResult.skipped && !deleteResult.error) {
+    forgetKnownCloudProfileIds(options, profileIds);
+  }
   return await loadDashboardState(options, deps);
 }
 
@@ -2052,6 +2339,7 @@ export async function linkCurrentCodexToProfile(options, profileId, deps = {}) {
     throw new Error("Current ~/.codex/auth.json is missing or unreadable.");
   }
 
+  await refreshLocalStoreFromCloud(options);
   await updateAuthStore(options, (store) => {
     const existing = store.profiles[profileId];
     if (!existing) {
@@ -2098,8 +2386,7 @@ export async function bootstrapLocalStore(options, deps = {}) {
 }
 
 export async function rebuildRuntime(options, deps = {}) {
-  const context = resolvePaths(options);
-  const store = readLocalAuthStore(context);
+  const store = await refreshLocalStoreFromCloud(options);
   const selectedProfileId = getSelectedProfileId(store);
   const selectedCredential = selectedProfileId ? store.profiles[selectedProfileId] : null;
 
@@ -2181,10 +2468,25 @@ export async function previewImportBundle(options, request = {}, deps = {}) {
   };
 }
 
+function collectCleanupRemovedProfileIds(actions) {
+  if (!Array.isArray(actions)) {
+    return [];
+  }
+  const removed = new Set();
+  for (const action of actions) {
+    if (action?.type === "cleanup-duplicate" && typeof action.sourceProfileId === "string" && action.sourceProfileId.trim()) {
+      removed.add(action.sourceProfileId.trim());
+    }
+  }
+  return [...removed];
+}
+
 export async function commitImportBundle(options, request = {}, deps = {}) {
-  const context = resolvePaths(options);
   const imported = readEncryptedExportBundle(request.bundle, request.passphrase);
-  const localStore = context.localAuthStoreExists ? readLocalAuthStore(context) : buildLocalAuthStore({});
+  const context = resolvePaths(options);
+  const localStore = context.localAuthStoreExists
+    ? await refreshLocalStoreFromCloud(options)
+    : buildLocalAuthStore({});
   const preview = previewBundleImport(localStore, imported.store);
 
   fs.mkdirSync(path.dirname(context.localAuthStorePath), { recursive: true });
@@ -2199,6 +2501,16 @@ export async function commitImportBundle(options, request = {}, deps = {}) {
     codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
   });
 
+  // Import may have merged duplicates away locally; make sure D1 follows the
+  // same removals so we don't resurrect them on the next pull.
+  const removedByImport = collectCleanupRemovedProfileIds(preview.actions);
+  if (removedByImport.length > 0) {
+    const deleteResult = await deleteCloudProfiles(options, removedByImport);
+    if (!deleteResult.skipped && !deleteResult.error) {
+      forgetKnownCloudProfileIds(options, removedByImport);
+    }
+  }
+
   return await loadDashboardState(options, deps);
 }
 
@@ -2206,7 +2518,7 @@ export async function cleanupDuplicateProfiles(options, deps = {}) {
   const context = resolvePaths(options);
   ensureLocalStoreInitialized(context);
 
-  const currentStore = readLocalAuthStore(context);
+  const currentStore = await refreshLocalStoreFromCloud(options);
   const normalized = normalizeDuplicateProfiles(currentStore);
 
   if (normalized.actions.length === 0) {
@@ -2229,6 +2541,17 @@ export async function cleanupDuplicateProfiles(options, deps = {}) {
     codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
   });
 
+  // Dedup removed the `sourceProfileId` side of each group; mirror those
+  // removals to D1 so the cleanup isn't silently undone by the full-store
+  // upsert or the next pull.
+  const removedIds = collectCleanupRemovedProfileIds(normalized.actions);
+  if (removedIds.length > 0) {
+    const deleteResult = await deleteCloudProfiles(options, removedIds);
+    if (!deleteResult.skipped && !deleteResult.error) {
+      forgetKnownCloudProfileIds(options, removedIds);
+    }
+  }
+
   return {
     summary: normalized.summary,
     actions: normalized.actions,
@@ -2236,10 +2559,61 @@ export async function cleanupDuplicateProfiles(options, deps = {}) {
   };
 }
 
+export function getStoreConfig(options) {
+  const config = loadDashboardConfig(options);
+  return {
+    ...summarizeDashboardConfigForClient(config),
+    lastCloudSyncError: getLastCloudSyncError(),
+  };
+}
+
+export function updateStoreConfig(options, update = {}) {
+  const nextConfig = saveDashboardConfig(options, update);
+  return {
+    ...summarizeDashboardConfigForClient(nextConfig),
+    lastCloudSyncError: getLastCloudSyncError(),
+  };
+}
+
+export async function bootstrapCloudStore(options) {
+  const context = resolvePaths(options);
+  ensureLocalStoreInitialized(context);
+  const store = readLocalAuthStore(context);
+  const result = await bootstrapCloudFromLocal(options, store);
+  replaceKnownCloudProfileIds(options, Object.keys(store.profiles || {}));
+  return {
+    ...result,
+    config: getStoreConfig(options),
+  };
+}
+
+export async function pullCloudStoreIntoLocal(options) {
+  const remote = await pullCloudStore(options);
+  const nextStore = await updateAuthStore(options, (localStore) =>
+    mergeRemoteIntoLocalPreservingLocalMeta(localStore, remote));
+  replaceKnownCloudProfileIds(options, Object.keys(remote.profiles || {}));
+  const selectedProfileId = getSelectedProfileId(nextStore);
+  const selectedCredential = selectedProfileId ? nextStore.profiles[selectedProfileId] : null;
+  await exportRuntimeFromLocal(options, nextStore, {
+    preferredProfileId: selectedProfileId,
+    codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
+    skipCloudSync: true,
+  });
+  return {
+    pulledProfileCount: Object.keys(remote.profiles || {}).length,
+    config: getStoreConfig(options),
+  };
+}
+
+export async function cloudHealth(options) {
+  return await checkCloudHealth(options);
+}
+
 export async function saveLoggedInProfile(options, profileId, credentials, saveOptions = {}) {
   const intent = saveOptions.intent === "upgrade" ? "upgrade" : "create";
   const nextCredential = buildStoredCodexCredential(credentials);
 
+  await refreshLocalStoreFromCloud(options);
   const nextStore = await updateAuthStore(options, (store) => {
     const existing = store.profiles[profileId];
     if (intent === "create") {

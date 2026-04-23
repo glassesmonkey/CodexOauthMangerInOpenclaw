@@ -2783,6 +2783,85 @@ export function renderHtml() {
                 </div>
               </section>
 
+              <section class="card panel panel-span-full" id="cloudSyncPanel">
+                <div class="panel-head">
+                  <div>
+                    <h2>存储模式 · 云端同步</h2>
+                    <p class="panel-copy">默认离线模式：所有账号数据只存本机。切换到云端模式后，canonical 数据会写入你自己的 Cloudflare D1，多设备之间共享并为 refresh 加分布式互斥。</p>
+                  </div>
+                </div>
+
+                <div class="settings-section">
+                  <label class="field">
+                    <span class="field-label">存储模式</span>
+                    <div class="radio-list" role="radiogroup" aria-label="存储模式">
+                      <label class="toggle">
+                        <input id="storeModeOffline" type="radio" name="storeMode" value="offline" />
+                        <span>
+                          <strong>离线模式</strong>
+                          <span class="field-note">默认，不需要任何配置，仅使用本机 <code>.local/auth-store.json</code>。刷新 Token 完全本地执行。</span>
+                        </span>
+                      </label>
+                      <label class="toggle">
+                        <input id="storeModeCloud" type="radio" name="storeMode" value="cloud" />
+                        <span>
+                          <strong>云端模式（Cloudflare D1）</strong>
+                          <span class="field-note">canonical store 同步到 D1；刷新 Token 时先从 D1 拉取、加 per-profile 互斥锁，再写回 D1。</span>
+                        </span>
+                      </label>
+                    </div>
+                  </label>
+                </div>
+
+                <div id="cloudSyncFields" class="settings-section" hidden>
+                  <label class="field">
+                    <span class="field-label">Cloudflare Account ID</span>
+                    <input id="cloudAccountIdInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="留空则保留当前配置；例如 your-account-id" />
+                    <span id="cloudAccountIdStatus" class="field-note">通过 <code>wrangler whoami</code> 可以看到。</span>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">D1 Database ID</span>
+                    <input id="cloudDatabaseIdInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="留空则保留当前配置；例如 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+                    <span id="cloudDatabaseIdStatus" class="field-note">运行 <code>wrangler d1 create codex-auth-dashboard</code> 时会打印。</span>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">Cloudflare API Token</span>
+                    <input id="cloudApiTokenInput" class="input" type="password" autocomplete="off" spellcheck="false" placeholder="输入后保存即写入本机 .local/dashboard-config.json（0600）" />
+                    <span id="cloudApiTokenStatus" class="field-note">未配置。需要 D1 Edit 权限。</span>
+                  </label>
+                  <label class="field">
+                    <span class="field-label">加密 Passphrase（可选）</span>
+                    <input id="cloudPassphraseInput" class="input" type="password" autocomplete="off" spellcheck="false" placeholder="留空则 D1 中明文存 credential" />
+                    <span id="cloudPassphraseStatus" class="field-note">设置后 credential blob 使用 AES-256-GCM + scrypt 加密。</span>
+                  </label>
+                  <div class="snapshot-grid">
+                    <div class="snapshot-item">
+                      <div class="stat-label">Device ID</div>
+                      <div id="cloudDeviceIdValue" class="snapshot-value">-</div>
+                    </div>
+                    <div class="snapshot-item">
+                      <div class="stat-label">D1 连通性</div>
+                      <div id="cloudHealthValue" class="snapshot-value">未检测</div>
+                    </div>
+                    <div class="snapshot-item">
+                      <div class="stat-label">最近同步错误</div>
+                      <div id="cloudSyncErrorValue" class="snapshot-value" data-multiline="true">-</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="settings-section">
+                  <div class="modal-actions">
+                    <button id="cloudConfigSaveButton" class="button-primary" type="button">保存配置</button>
+                    <button id="cloudHealthCheckButton" class="button-secondary" type="button">测试连接</button>
+                    <button id="cloudBootstrapButton" class="button-danger" type="button">用本地快照强制覆盖 D1（危险）</button>
+                    <button id="cloudPullButton" class="button-secondary" type="button">从 D1 合并到本地（保留本地 meta）</button>
+                  </div>
+                  <p class="field-note">平日的增删改 / 刷新会自动同步。左边会清空 D1 后用本机快照整库重写；右边只把 D1 的账号和较新的 token 合并回本地，默认保留本机的 order / lastGood / usageStats / maintenance。</p>
+                  <div id="cloudConfigStatus" class="field-note">-</div>
+                </div>
+              </section>
+
               <section class="card panel">
                 <div class="panel-head">
                   <div>
@@ -6406,6 +6485,209 @@ export function renderHtml() {
         persistAutomationSettings();
         setFlash(appState.usageProxyEnabled ? "已开启额度请求代理" : "已关闭额度请求代理", "info");
       });
+
+      // ===== Cloud sync settings (D1) =====
+      const storeModeOfflineRadio = document.getElementById("storeModeOffline");
+      const storeModeCloudRadio = document.getElementById("storeModeCloud");
+      const cloudSyncFields = document.getElementById("cloudSyncFields");
+      const cloudAccountIdInput = document.getElementById("cloudAccountIdInput");
+      const cloudDatabaseIdInput = document.getElementById("cloudDatabaseIdInput");
+      const cloudAccountIdStatus = document.getElementById("cloudAccountIdStatus");
+      const cloudDatabaseIdStatus = document.getElementById("cloudDatabaseIdStatus");
+      const cloudApiTokenInput = document.getElementById("cloudApiTokenInput");
+      const cloudApiTokenStatus = document.getElementById("cloudApiTokenStatus");
+      const cloudPassphraseInput = document.getElementById("cloudPassphraseInput");
+      const cloudPassphraseStatus = document.getElementById("cloudPassphraseStatus");
+      const cloudDeviceIdValue = document.getElementById("cloudDeviceIdValue");
+      const cloudHealthValue = document.getElementById("cloudHealthValue");
+      const cloudSyncErrorValue = document.getElementById("cloudSyncErrorValue");
+      const cloudConfigSaveButton = document.getElementById("cloudConfigSaveButton");
+      const cloudHealthCheckButton = document.getElementById("cloudHealthCheckButton");
+      const cloudBootstrapButton = document.getElementById("cloudBootstrapButton");
+      const cloudPullButton = document.getElementById("cloudPullButton");
+      const cloudConfigStatus = document.getElementById("cloudConfigStatus");
+
+      function setCloudStatus(text, tone) {
+        if (!cloudConfigStatus) return;
+        cloudConfigStatus.textContent = text || "-";
+        cloudConfigStatus.dataset.tone = tone || "";
+      }
+
+      function applyCloudConfigSnapshot(config) {
+        if (!config) return;
+        const mode = config.storeMode === "cloud" ? "cloud" : "offline";
+        if (storeModeOfflineRadio) storeModeOfflineRadio.checked = mode === "offline";
+        if (storeModeCloudRadio) storeModeCloudRadio.checked = mode === "cloud";
+        if (cloudSyncFields) cloudSyncFields.hidden = mode !== "cloud";
+        const d1 = config.d1 || {};
+        if (cloudAccountIdInput) cloudAccountIdInput.value = "";
+        if (cloudDatabaseIdInput) cloudDatabaseIdInput.value = "";
+        if (cloudAccountIdStatus) {
+          cloudAccountIdStatus.textContent = d1.hasAccountId
+            ? "已配置（前端不回显；需要更换时重新填入）。"
+            : "通过 wrangler whoami 可以看到。";
+        }
+        if (cloudDatabaseIdStatus) {
+          cloudDatabaseIdStatus.textContent = d1.hasDatabaseId
+            ? "已配置（前端不回显；需要更换时重新填入）。"
+            : "运行 wrangler d1 create codex-auth-dashboard 时会打印。";
+        }
+        if (cloudApiTokenInput) cloudApiTokenInput.value = "";
+        if (cloudApiTokenStatus) {
+          cloudApiTokenStatus.textContent = d1.hasApiToken
+            ? "已配置（保存后后端不回显，需要更换则重新填入）。"
+            : "未配置。需要 D1 Edit 权限。";
+        }
+        if (cloudPassphraseInput) cloudPassphraseInput.value = "";
+        if (cloudPassphraseStatus) {
+          cloudPassphraseStatus.textContent = config.hasPassphrase
+            ? "已设置；credential blob 使用 AES-256-GCM + scrypt 加密存储。"
+            : "设置后 credential blob 使用 AES-256-GCM + scrypt 加密。当前 D1 中存明文。";
+        }
+        if (cloudDeviceIdValue) cloudDeviceIdValue.textContent = config.deviceId || "-";
+        if (cloudSyncErrorValue) {
+          cloudSyncErrorValue.textContent = config.lastCloudSyncError
+            ? "" + (config.lastCloudSyncError.at || "") + " · " + (config.lastCloudSyncError.error || "")
+            : "-";
+        }
+      }
+
+      async function loadCloudConfig() {
+        try {
+          const response = await fetch("/api/config/store", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error("HTTP " + response.status);
+          }
+          const json = await response.json();
+          applyCloudConfigSnapshot(json);
+        } catch (error) {
+          setCloudStatus("读取存储配置失败: " + (error instanceof Error ? error.message : String(error)), "error");
+        }
+      }
+
+      async function saveCloudConfig() {
+        if (!storeModeOfflineRadio || !storeModeCloudRadio) return;
+        const storeMode = storeModeCloudRadio.checked ? "cloud" : "offline";
+        const payload = {
+          storeMode,
+          d1: {
+            // Only send apiToken when the user typed something; empty means "keep existing".
+          },
+        };
+        if (cloudAccountIdInput && cloudAccountIdInput.value.trim()) {
+          payload.d1.accountId = cloudAccountIdInput.value.trim();
+        }
+        if (cloudDatabaseIdInput && cloudDatabaseIdInput.value.trim()) {
+          payload.d1.databaseId = cloudDatabaseIdInput.value.trim();
+        }
+        if (cloudApiTokenInput && cloudApiTokenInput.value.trim()) {
+          payload.d1.apiToken = cloudApiTokenInput.value.trim();
+        }
+        if (cloudPassphraseInput && cloudPassphraseInput.value.length > 0) {
+          payload.storePassphrase = cloudPassphraseInput.value;
+        }
+
+        try {
+          const response = await fetch("/api/config/store", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const json = await response.json();
+          if (!response.ok) {
+            throw new Error(json.error || ("HTTP " + response.status));
+          }
+          applyCloudConfigSnapshot(json);
+          setCloudStatus(storeMode === "cloud" ? "已保存云端配置" : "已切换为离线模式", "success");
+          setFlash(storeMode === "cloud" ? "已开启云端同步" : "已切换为离线模式", "info");
+        } catch (error) {
+          setCloudStatus("保存失败: " + (error instanceof Error ? error.message : String(error)), "error");
+        }
+      }
+
+      async function checkCloudHealth() {
+        if (!cloudHealthValue) return;
+        cloudHealthValue.textContent = "检测中…";
+        try {
+          const response = await fetch("/api/d1/health", { cache: "no-store" });
+          const json = await response.json();
+          if (json.ok) {
+            cloudHealthValue.textContent = "✓ 连通" + (json.schemaVersion != null ? "，schema v" + json.schemaVersion : "");
+            setCloudStatus("D1 连通正常", "success");
+          } else {
+            cloudHealthValue.textContent = "✗ " + (json.reason || "不可用");
+            setCloudStatus("D1 不可用: " + (json.reason || "unknown"), "error");
+          }
+        } catch (error) {
+          cloudHealthValue.textContent = "✗ 检测失败";
+          setCloudStatus("检测失败: " + (error instanceof Error ? error.message : String(error)), "error");
+        }
+      }
+
+      async function bootstrapCloud() {
+        const confirmMessage = [
+          "即将用本机快照强制覆盖 D1：",
+          "· D1 上所有 profile / order / lastGood / usageStats / maintenance 会先被删光，然后写入本地当前的内容。",
+          "· 其它设备在本机上次同步后推到 D1 的改动会被覆盖掉。",
+          "",
+          "仅在你确定本机的快照才是可信的一份时使用。继续吗？",
+        ].join("\n");
+        if (!window.confirm(confirmMessage)) {
+          setCloudStatus("已取消强制覆盖", "info");
+          return;
+        }
+        try {
+          setCloudStatus("正在用本地快照强制覆盖 D1…", "info");
+          const response = await fetch("/api/d1/bootstrap", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+          const json = await response.json();
+          if (!response.ok) throw new Error(json.error || ("HTTP " + response.status));
+          applyCloudConfigSnapshot(json.config);
+          setCloudStatus("已用本地快照强制覆盖 D1 · " + (json.statementCount || 0) + " 条 SQL", "success");
+        } catch (error) {
+          setCloudStatus("强制覆盖失败: " + (error instanceof Error ? error.message : String(error)), "error");
+        }
+      }
+
+      async function pullCloud() {
+        const confirmMessage = [
+          "即将把 D1 snapshot 合并回本地：",
+          "· profile 会按“expires 更晚的一边赢”合并，D1 上的新账号也会并入本机。",
+          "· 本机的 order / lastGood / usageStats / maintenance 默认保留，不会因为这次拉取被 D1 硬覆盖。",
+          "· 这次操作只更新本机，不会把本地内容反向回写到 D1。",
+          "",
+          "继续吗？",
+        ].join("\n");
+        if (!window.confirm(confirmMessage)) {
+          setCloudStatus("已取消合并", "info");
+          return;
+        }
+        try {
+          setCloudStatus("正在从 D1 合并到本地…", "info");
+          const response = await fetch("/api/d1/pull", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+          const json = await response.json();
+          if (!response.ok) throw new Error(json.error || ("HTTP " + response.status));
+          applyCloudConfigSnapshot(json.config);
+          setCloudStatus("已从 D1 合并 " + (json.pulledProfileCount || 0) + " 条 profile；本地 order/meta 已保留。", "success");
+          void refreshData();
+        } catch (error) {
+          setCloudStatus("合并失败: " + (error instanceof Error ? error.message : String(error)), "error");
+        }
+      }
+
+      function handleStoreModeChange() {
+        const cloud = storeModeCloudRadio && storeModeCloudRadio.checked;
+        if (cloudSyncFields) cloudSyncFields.hidden = !cloud;
+        setCloudStatus(cloud ? "填完 Cloudflare Account ID / Database ID / API Token 后点保存" : "切回离线模式后点保存即可生效", "info");
+      }
+
+      if (storeModeOfflineRadio) storeModeOfflineRadio.addEventListener("change", handleStoreModeChange);
+      if (storeModeCloudRadio) storeModeCloudRadio.addEventListener("change", handleStoreModeChange);
+      if (cloudConfigSaveButton) cloudConfigSaveButton.addEventListener("click", () => { void saveCloudConfig(); });
+      if (cloudHealthCheckButton) cloudHealthCheckButton.addEventListener("click", () => { void checkCloudHealth(); });
+      if (cloudBootstrapButton) cloudBootstrapButton.addEventListener("click", () => { void bootstrapCloud(); });
+      if (cloudPullButton) cloudPullButton.addEventListener("click", () => { void pullCloud(); });
+
+      void loadCloudConfig();
 
       tabButtons.forEach((button) => {
         button.addEventListener("click", () => {
