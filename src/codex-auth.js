@@ -283,6 +283,51 @@ async function exchangeAuthorizationCode(code, verifier, redirectUri = OPENAI_RE
   };
 }
 
+async function extractOAuthErrorDetail(response) {
+  let body = "";
+  try {
+    body = await response.text();
+  } catch {
+    body = "";
+  }
+
+  const statusLabel = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`;
+
+  if (!body) {
+    return statusLabel;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    parsed = null;
+  }
+
+  if (parsed && typeof parsed === "object") {
+    const err = parsed.error;
+    if (err && typeof err === "object") {
+      const code = readTrimmedString(err.code) || readTrimmedString(err.type);
+      const message = readTrimmedString(err.message) || readTrimmedString(err.description);
+      const combined = [code, message].filter(Boolean).join(": ");
+      if (combined) {
+        return `${statusLabel} ${combined}`;
+      }
+    }
+    if (typeof err === "string" && err.trim()) {
+      const description = readTrimmedString(parsed.error_description);
+      return description ? `${statusLabel} ${err.trim()}: ${description}` : `${statusLabel} ${err.trim()}`;
+    }
+    const description = readTrimmedString(parsed.error_description) || readTrimmedString(parsed.message);
+    if (description) {
+      return `${statusLabel} ${description}`;
+    }
+  }
+
+  const snippet = body.replace(/\s+/g, " ").trim().slice(0, 180);
+  return snippet ? `${statusLabel} ${snippet}` : statusLabel;
+}
+
 async function refreshAccessToken(refreshToken) {
   const response = await fetch(OPENAI_TOKEN_URL, {
     method: "POST",
@@ -295,16 +340,29 @@ async function refreshAccessToken(refreshToken) {
   });
 
   if (!response.ok) {
-    throw new Error("Failed to refresh OpenAI Codex token");
+    const detail = await extractOAuthErrorDetail(response);
+    throw new Error(`Failed to refresh OpenAI Codex token: ${detail}`);
   }
 
-  const json = await response.json();
+  let json;
+  try {
+    json = await response.json();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to refresh OpenAI Codex token: invalid JSON response (${reason})`);
+  }
+
   const access = readTrimmedString(json.access_token);
   const refresh = readTrimmedString(json.refresh_token);
   const expiresIn = typeof json.expires_in === "number" ? json.expires_in : null;
 
   if (!access || !refresh || !expiresIn) {
-    throw new Error("Failed to refresh OpenAI Codex token");
+    const missing = [
+      access ? null : "access_token",
+      refresh ? null : "refresh_token",
+      expiresIn ? null : "expires_in",
+    ].filter(Boolean).join(", ");
+    throw new Error(`Failed to refresh OpenAI Codex token: response missing required fields (${missing})`);
   }
 
   return {
