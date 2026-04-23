@@ -6668,7 +6668,7 @@ export function renderHtml() {
           if (!response.ok) throw new Error(json.error || ("HTTP " + response.status));
           applyCloudConfigSnapshot(json.config);
           setCloudStatus("已从 D1 合并 " + (json.pulledProfileCount || 0) + " 条 profile；本地 order/meta 已保留。", "success");
-          void refreshData();
+          void refreshState();
         } catch (error) {
           setCloudStatus("合并失败: " + (error instanceof Error ? error.message : String(error)), "error");
         }
