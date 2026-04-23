@@ -79,6 +79,19 @@ import {
 } from "./session-store.js";
 import { loadUsageRefreshBatch } from "./usage-refresh.js";
 import { dedupeStrings, isRecord, toErrorMessage } from "./utils.js";
+import {
+  bootstrapCloudFromLocal,
+  checkCloudHealth,
+  deleteCloudProfiles,
+  isCloudMode,
+  loadCloudContext,
+  pullCloudStore,
+  pushProfileCloudUpdate,
+  pushMetaCloudUpdate,
+  syncLocalStoreToCloud,
+  withRefreshLease,
+} from "./cloud-gate.js";
+import { loadDashboardConfig, saveDashboardConfig, summarizeDashboardConfigForClient } from "./dashboard-config.js";
 
 function resolveAccountId(credential) {
   if (typeof credential?.accountId === "string" && credential.accountId.trim()) {
@@ -1150,6 +1163,35 @@ async function exportRuntimeFromLocal(options, store, exportOptions = {}) {
   if (exportOptions.codexCredential && isCodexCompatibleCredential(exportOptions.codexCredential)) {
     await writeCodexSelection(options, exportOptions.codexCredential);
   }
+
+  // Best-effort sync of the canonical local store to the cloud backend when
+  // cloud mode is enabled. Failures are swallowed — the local write has
+  // already succeeded and the dashboard keeps functioning; the UI surfaces
+  // the last cloud sync status via /api/config/store.
+  if (exportOptions.skipCloudSync !== true) {
+    try {
+      const result = await syncLocalStoreToCloud(options, store, { replace: true });
+      if (!result.skipped && result.error) {
+        lastCloudSyncError = {
+          at: new Date().toISOString(),
+          error: result.error,
+        };
+      } else if (!result.skipped) {
+        lastCloudSyncError = null;
+      }
+    } catch (error) {
+      lastCloudSyncError = {
+        at: new Date().toISOString(),
+        error: toErrorMessage(error),
+      };
+    }
+  }
+}
+
+let lastCloudSyncError = null;
+
+export function getLastCloudSyncError() {
+  return lastCloudSyncError;
 }
 
 function mergeRefreshedCredential(existing, incoming) {
@@ -1823,10 +1865,27 @@ async function doRunTokenKeepalive(options, deps = {}) {
   const scheduledIntervalSeconds = getKeepaliveScheduledIntervalSeconds(trigger, deps.intervalSeconds);
   const failedProfiles = [];
   const changedProfileIds = [];
+  const leaseSkippedProfiles = [];
   let checkedCount = 0;
   let skippedTooEarlyCount = 0;
   let skippedCooldownCount = 0;
+  let skippedLeaseCount = 0;
   let exportedRuntime = false;
+
+  // In cloud mode, pull the latest D1 snapshot first so the local store picks
+  // up any credentials that another device rotated since we last wrote. We
+  // prefer whichever side has the later `expires` per profile.
+  const cloudContext = await loadCloudContext(options);
+  const cloudEnabled = Boolean(cloudContext.client);
+  let cloudPrePullError = null;
+  if (cloudEnabled) {
+    try {
+      const remote = await pullCloudStore(options);
+      await updateAuthStore(options, (localStore) => mergeRemoteIntoLocal(localStore, remote));
+    } catch (error) {
+      cloudPrePullError = toErrorMessage(error);
+    }
+  }
 
   const nextStore = buildLocalAuthStore(readLocalAuthStore(context));
   const maintenance = buildMaintenanceSummary(nextStore);
@@ -1855,8 +1914,8 @@ async function doRunTokenKeepalive(options, deps = {}) {
       continue;
     }
 
-    try {
-      const resolved = deps.refreshImpl
+    const performRefresh = async () => {
+      return deps.refreshImpl
         ? await resolveCredentialToken(entry.credential, {
           proxyConfig: deps.proxyConfig,
           forceRefresh: true,
@@ -1866,11 +1925,27 @@ async function doRunTokenKeepalive(options, deps = {}) {
           proxyConfig: deps.proxyConfig,
           forceRefresh: true,
         });
+    };
 
+    try {
+      const leaseOutcome = await withRefreshLease(options, entry.profileId, performRefresh, { ttlMs: 30_000 });
+      if (!leaseOutcome.ran) {
+        skippedLeaseCount += 1;
+        leaseSkippedProfiles.push(entry.profileId);
+        continue;
+      }
+      const resolved = leaseOutcome.result;
       if (resolved.updated) {
         nextStore.profiles[entry.profileId] = mergeRefreshedCredential(nextStore.profiles[entry.profileId], resolved.credential);
         changedProfileIds.push(entry.profileId);
         lastRefreshByProfileId[entry.profileId] = attemptedAt;
+
+        // Push the single refreshed profile upstream immediately so sibling
+        // devices see the new refresh_token without waiting for the trailing
+        // full-store sync at the end of this run.
+        if (cloudEnabled) {
+          await pushProfileCloudUpdate(options, entry.profileId, nextStore.profiles[entry.profileId]);
+        }
       }
     } catch (error) {
       failedProfiles.push({
@@ -1900,6 +1975,10 @@ async function doRunTokenKeepalive(options, deps = {}) {
       codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
     });
     exportedRuntime = true;
+  } else if (cloudEnabled) {
+    // Maintenance meta moved even though no credentials changed; make sure
+    // the other devices see the updated lastAttemptAt / lastError.
+    await pushMetaCloudUpdate(options, "maintenance", finalStore.maintenance ?? null);
   }
 
   return {
@@ -1910,12 +1989,55 @@ async function doRunTokenKeepalive(options, deps = {}) {
     refreshedCount: changedProfileIds.length,
     skippedTooEarlyCount,
     skippedCooldownCount,
+    skippedLeaseCount,
     failedCount: failedProfiles.length,
     changedProfileIds,
     failedProfiles,
+    leaseSkippedProfiles,
     exportedRuntime,
+    storeMode: cloudContext.config.storeMode,
+    cloudPrePullError,
     state: await loadDashboardState(options, deps),
   };
+}
+
+// Merge a remote D1 snapshot into the local store, preferring whichever side
+// has the fresher `expires` per profile. Meta keys (order / lastGood /
+// usageStats / maintenance) prefer remote when present.
+function mergeRemoteIntoLocal(localStore, remote) {
+  const merged = buildLocalAuthStore(localStore);
+  if (!remote) {
+    return merged;
+  }
+
+  const remoteProfiles = isRecord(remote.profiles) ? remote.profiles : {};
+  for (const [profileId, remoteCredential] of Object.entries(remoteProfiles)) {
+    const existing = merged.profiles[profileId];
+    if (!existing) {
+      merged.profiles[profileId] = remoteCredential;
+      continue;
+    }
+    const localExpires = resolveExpiresAt(existing) ?? 0;
+    const remoteExpires = resolveExpiresAt(remoteCredential) ?? 0;
+    merged.profiles[profileId] = remoteExpires > localExpires
+      ? mergeRefreshedCredential(existing, remoteCredential)
+      : existing;
+  }
+
+  if (isRecord(remote.order)) {
+    merged.order = remote.order;
+  }
+  if (isRecord(remote.lastGood)) {
+    merged.lastGood = remote.lastGood;
+  }
+  if (isRecord(remote.usageStats)) {
+    merged.usageStats = remote.usageStats;
+  }
+  if (isRecord(remote.maintenance)) {
+    merged.maintenance = remote.maintenance;
+  }
+
+  return merged;
 }
 
 export function runTokenKeepalive(options, deps = {}) {
@@ -2234,6 +2356,54 @@ export async function cleanupDuplicateProfiles(options, deps = {}) {
     actions: normalized.actions,
     state: await loadDashboardState(options, deps),
   };
+}
+
+export function getStoreConfig(options) {
+  const config = loadDashboardConfig(options);
+  return {
+    ...summarizeDashboardConfigForClient(config),
+    lastCloudSyncError: getLastCloudSyncError(),
+  };
+}
+
+export function updateStoreConfig(options, update = {}) {
+  const nextConfig = saveDashboardConfig(options, update);
+  return {
+    ...summarizeDashboardConfigForClient(nextConfig),
+    lastCloudSyncError: getLastCloudSyncError(),
+  };
+}
+
+export async function bootstrapCloudStore(options) {
+  const context = resolvePaths(options);
+  ensureLocalStoreInitialized(context);
+  const store = readLocalAuthStore(context);
+  const result = await bootstrapCloudFromLocal(options, store);
+  return {
+    ...result,
+    config: getStoreConfig(options),
+  };
+}
+
+export async function pullCloudStoreIntoLocal(options) {
+  const context = resolvePaths(options);
+  ensureLocalStoreInitialized(context);
+  const remote = await pullCloudStore(options);
+  const nextStore = await updateAuthStore(options, (localStore) => mergeRemoteIntoLocal(localStore, remote));
+  const selectedProfileId = getSelectedProfileId(nextStore);
+  const selectedCredential = selectedProfileId ? nextStore.profiles[selectedProfileId] : null;
+  await exportRuntimeFromLocal(options, nextStore, {
+    preferredProfileId: selectedProfileId,
+    codexCredential: isCodexCompatibleCredential(selectedCredential) ? selectedCredential : null,
+  });
+  return {
+    pulledProfileCount: Object.keys(remote.profiles || {}).length,
+    config: getStoreConfig(options),
+  };
+}
+
+export async function cloudHealth(options) {
+  return await checkCloudHealth(options);
 }
 
 export async function saveLoggedInProfile(options, profileId, credentials, saveOptions = {}) {
