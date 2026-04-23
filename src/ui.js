@@ -2816,13 +2816,13 @@ export function renderHtml() {
                 <div id="cloudSyncFields" class="settings-section" hidden>
                   <label class="field">
                     <span class="field-label">Cloudflare Account ID</span>
-                    <input id="cloudAccountIdInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="02a9c6c409c6b66734fadf5010a89ee6" />
-                    <span class="field-note">通过 <code>wrangler whoami</code> 可以看到。</span>
+                    <input id="cloudAccountIdInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="留空则保留当前配置；例如 your-account-id" />
+                    <span id="cloudAccountIdStatus" class="field-note">通过 <code>wrangler whoami</code> 可以看到。</span>
                   </label>
                   <label class="field">
                     <span class="field-label">D1 Database ID</span>
-                    <input id="cloudDatabaseIdInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="60e4514c-654e-4a75-8a1e-7170dd86d7b3" />
-                    <span class="field-note">运行 <code>wrangler d1 create codex-auth-dashboard</code> 时会打印。</span>
+                    <input id="cloudDatabaseIdInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="留空则保留当前配置；例如 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+                    <span id="cloudDatabaseIdStatus" class="field-note">运行 <code>wrangler d1 create codex-auth-dashboard</code> 时会打印。</span>
                   </label>
                   <label class="field">
                     <span class="field-label">Cloudflare API Token</span>
@@ -2854,10 +2854,10 @@ export function renderHtml() {
                   <div class="modal-actions">
                     <button id="cloudConfigSaveButton" class="button-primary" type="button">保存配置</button>
                     <button id="cloudHealthCheckButton" class="button-secondary" type="button">测试连接</button>
-                    <button id="cloudBootstrapButton" class="button-danger" type="button">用本地快照重置 D1（覆盖）</button>
-                    <button id="cloudPullButton" class="button-danger" type="button">从 D1 拉取（覆盖本地 order/meta）</button>
+                    <button id="cloudBootstrapButton" class="button-danger" type="button">用本地快照强制覆盖 D1（危险）</button>
+                    <button id="cloudPullButton" class="button-secondary" type="button">从 D1 合并到本地（保留本地 meta）</button>
                   </div>
-                  <p class="field-note">平日的增删改 / 刷新会自动同步，上面两个按钮是个别账号池与 D1 发生未消解分歧时的灾难恢复，点前会弹框提示。</p>
+                  <p class="field-note">平日的增删改 / 刷新会自动同步。左边会清空 D1 后用本机快照整库重写；右边只把 D1 的账号和较新的 token 合并回本地，默认保留本机的 order / lastGood / usageStats / maintenance。</p>
                   <div id="cloudConfigStatus" class="field-note">-</div>
                 </div>
               </section>
@@ -6492,6 +6492,8 @@ export function renderHtml() {
       const cloudSyncFields = document.getElementById("cloudSyncFields");
       const cloudAccountIdInput = document.getElementById("cloudAccountIdInput");
       const cloudDatabaseIdInput = document.getElementById("cloudDatabaseIdInput");
+      const cloudAccountIdStatus = document.getElementById("cloudAccountIdStatus");
+      const cloudDatabaseIdStatus = document.getElementById("cloudDatabaseIdStatus");
       const cloudApiTokenInput = document.getElementById("cloudApiTokenInput");
       const cloudApiTokenStatus = document.getElementById("cloudApiTokenStatus");
       const cloudPassphraseInput = document.getElementById("cloudPassphraseInput");
@@ -6518,8 +6520,18 @@ export function renderHtml() {
         if (storeModeCloudRadio) storeModeCloudRadio.checked = mode === "cloud";
         if (cloudSyncFields) cloudSyncFields.hidden = mode !== "cloud";
         const d1 = config.d1 || {};
-        if (cloudAccountIdInput) cloudAccountIdInput.value = d1.accountId || "";
-        if (cloudDatabaseIdInput) cloudDatabaseIdInput.value = d1.databaseId || "";
+        if (cloudAccountIdInput) cloudAccountIdInput.value = "";
+        if (cloudDatabaseIdInput) cloudDatabaseIdInput.value = "";
+        if (cloudAccountIdStatus) {
+          cloudAccountIdStatus.textContent = d1.hasAccountId
+            ? "已配置（前端不回显；需要更换时重新填入）。"
+            : "通过 wrangler whoami 可以看到。";
+        }
+        if (cloudDatabaseIdStatus) {
+          cloudDatabaseIdStatus.textContent = d1.hasDatabaseId
+            ? "已配置（前端不回显；需要更换时重新填入）。"
+            : "运行 wrangler d1 create codex-auth-dashboard 时会打印。";
+        }
         if (cloudApiTokenInput) cloudApiTokenInput.value = "";
         if (cloudApiTokenStatus) {
           cloudApiTokenStatus.textContent = d1.hasApiToken
@@ -6559,11 +6571,15 @@ export function renderHtml() {
         const payload = {
           storeMode,
           d1: {
-            accountId: (cloudAccountIdInput && cloudAccountIdInput.value) || "",
-            databaseId: (cloudDatabaseIdInput && cloudDatabaseIdInput.value) || "",
             // Only send apiToken when the user typed something; empty means "keep existing".
           },
         };
+        if (cloudAccountIdInput && cloudAccountIdInput.value.trim()) {
+          payload.d1.accountId = cloudAccountIdInput.value.trim();
+        }
+        if (cloudDatabaseIdInput && cloudDatabaseIdInput.value.trim()) {
+          payload.d1.databaseId = cloudDatabaseIdInput.value.trim();
+        }
         if (cloudApiTokenInput && cloudApiTokenInput.value.trim()) {
           payload.d1.apiToken = cloudApiTokenInput.value.trim();
         }
@@ -6610,50 +6626,51 @@ export function renderHtml() {
 
       async function bootstrapCloud() {
         const confirmMessage = [
-          "即将用本机快照覆盖 D1：",
+          "即将用本机快照强制覆盖 D1：",
           "· D1 上所有 profile / order / lastGood / usageStats / maintenance 会先被删光，然后写入本地当前的内容。",
           "· 其它设备在本机上次同步后推到 D1 的改动会被覆盖掉。",
           "",
           "仅在你确定本机的快照才是可信的一份时使用。继续吗？",
         ].join("\n");
         if (!window.confirm(confirmMessage)) {
-          setCloudStatus("已取消重置", "info");
+          setCloudStatus("已取消强制覆盖", "info");
           return;
         }
         try {
-          setCloudStatus("正在用本地快照重置 D1…", "info");
+          setCloudStatus("正在用本地快照强制覆盖 D1…", "info");
           const response = await fetch("/api/d1/bootstrap", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
           const json = await response.json();
           if (!response.ok) throw new Error(json.error || ("HTTP " + response.status));
           applyCloudConfigSnapshot(json.config);
-          setCloudStatus("已用本地快照重置 D1 · " + (json.statementCount || 0) + " 条 SQL", "success");
+          setCloudStatus("已用本地快照强制覆盖 D1 · " + (json.statementCount || 0) + " 条 SQL", "success");
         } catch (error) {
-          setCloudStatus("重置失败: " + (error instanceof Error ? error.message : String(error)), "error");
+          setCloudStatus("强制覆盖失败: " + (error instanceof Error ? error.message : String(error)), "error");
         }
       }
 
       async function pullCloud() {
         const confirmMessage = [
-          "即将从 D1 拉取 snapshot 回本地：",
-          "· profile 会按“expires 更晚的一边赢”合并，本地上次刷新出来的新 token 不会丢。",
-          "· order / lastGood / usageStats / maintenance 会被 D1 的版本硬覆盖。如果你刚在本机改过顺序，会被覆盖。",
+          "即将把 D1 snapshot 合并回本地：",
+          "· profile 会按“expires 更晚的一边赢”合并，D1 上的新账号也会并入本机。",
+          "· 本机的 order / lastGood / usageStats / maintenance 默认保留，不会因为这次拉取被 D1 硬覆盖。",
+          "· 这次操作只更新本机，不会把本地内容反向回写到 D1。",
           "",
           "继续吗？",
         ].join("\n");
         if (!window.confirm(confirmMessage)) {
-          setCloudStatus("已取消拉取", "info");
+          setCloudStatus("已取消合并", "info");
           return;
         }
         try {
-          setCloudStatus("正在从 D1 拉取…", "info");
+          setCloudStatus("正在从 D1 合并到本地…", "info");
           const response = await fetch("/api/d1/pull", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
           const json = await response.json();
           if (!response.ok) throw new Error(json.error || ("HTTP " + response.status));
           applyCloudConfigSnapshot(json.config);
-          setCloudStatus("已从 D1 拉取 " + (json.pulledProfileCount || 0) + " 条 profile；order/meta 使用 D1 版本。", "success");
+          setCloudStatus("已从 D1 合并 " + (json.pulledProfileCount || 0) + " 条 profile；本地 order/meta 已保留。", "success");
           void refreshData();
         } catch (error) {
-          setCloudStatus("拉取失败: " + (error instanceof Error ? error.message : String(error)), "error");
+          setCloudStatus("合并失败: " + (error instanceof Error ? error.message : String(error)), "error");
         }
       }
 

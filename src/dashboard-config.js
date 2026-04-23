@@ -60,6 +60,16 @@ function coerceDeviceId(value) {
   return `${host}-${randomUUID().slice(0, 8)}`;
 }
 
+function normalizeCloudKnownProfileIds(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((entry) => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 export function getDashboardConfigPath(options = {}) {
   const context = resolvePaths(options);
   return path.join(context.localStateDir, CONFIG_FILENAME);
@@ -85,6 +95,7 @@ export function loadDashboardConfig(options = {}) {
     storeMode,
     d1,
     deviceId,
+    cloudKnownProfileIds: normalizeCloudKnownProfileIds(raw.cloudKnownProfileIds),
     hasPassphrase: Boolean(passphrase),
     passphrase,
     raw,
@@ -113,12 +124,17 @@ export function saveDashboardConfig(options = {}, update = {}) {
 
   if (Object.prototype.hasOwnProperty.call(update, "d1") && isRecord(update.d1)) {
     const incomingD1 = normalizeD1Settings(update.d1);
-    // Preserve existing apiToken when caller omits it (so UI can hide it).
+    // Preserve existing credentials/IDs when caller omits them so the UI can
+    // avoid echoing sensitive identity values back into the browser.
     const existingD1 = normalizeD1Settings(current.raw.d1);
+    const preservedAccountId = incomingD1.accountId || existingD1.accountId || "";
+    const preservedDatabaseId = incomingD1.databaseId || existingD1.databaseId || "";
     const preservedToken = incomingD1.apiToken || existingD1.apiToken || "";
     next.d1 = {
       ...existingD1,
       ...incomingD1,
+      accountId: preservedAccountId,
+      databaseId: preservedDatabaseId,
       apiToken: preservedToken,
     };
   }
@@ -136,6 +152,15 @@ export function saveDashboardConfig(options = {}, update = {}) {
     next.deviceId = update.deviceId.trim();
   }
 
+  if (Object.prototype.hasOwnProperty.call(update, "cloudKnownProfileIds")) {
+    const ids = normalizeCloudKnownProfileIds(update.cloudKnownProfileIds);
+    if (ids.length > 0) {
+      next.cloudKnownProfileIds = ids;
+    } else {
+      delete next.cloudKnownProfileIds;
+    }
+  }
+
   writeConfigFile(configPath, next);
   return loadDashboardConfig(options);
 }
@@ -147,8 +172,8 @@ export function summarizeDashboardConfigForClient(config) {
     deviceId: config.deviceId,
     hasPassphrase: Boolean(config.hasPassphrase),
     d1: {
-      accountId: d1.accountId || "",
-      databaseId: d1.databaseId || "",
+      hasAccountId: Boolean(d1.accountId),
+      hasDatabaseId: Boolean(d1.databaseId),
       hasApiToken: Boolean(d1.apiToken),
       baseUrl: d1.baseUrl || "",
       timeoutMs: d1.timeoutMs ?? 15_000,

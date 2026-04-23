@@ -14,6 +14,7 @@ import { createD1Client } from "../src/d1-client.js";
 import {
   loadDashboardConfig,
   saveDashboardConfig,
+  summarizeDashboardConfigForClient,
 } from "../src/dashboard-config.js";
 import {
   deserializeCredentialFromRemote,
@@ -26,6 +27,7 @@ import {
   cleanupDuplicateProfiles,
   deleteProfile,
   deleteProfiles,
+  pullCloudStoreIntoLocal,
   runTokenKeepalive,
   saveLoggedInProfile,
 } from "../src/state.js";
@@ -197,13 +199,21 @@ test("dashboard-config: storeMode defaults to offline and can be toggled", () =>
     assert.equal(updated.d1.accountId, "acc");
     assert.equal(updated.d1.apiToken, "tok");
 
-    // Passing an empty apiToken must preserve the existing one.
+    // Omitting account/database/token should preserve the existing values.
     const partial = saveDashboardConfig({ localStateDir }, {
       storeMode: "cloud",
-      d1: { accountId: "acc-new", databaseId: "db-new" },
+      d1: {},
     });
     assert.equal(partial.d1.apiToken, "tok");
-    assert.equal(partial.d1.accountId, "acc-new");
+    assert.equal(partial.d1.accountId, "acc");
+    assert.equal(partial.d1.databaseId, "db");
+
+    const summary = summarizeDashboardConfigForClient(partial);
+    assert.equal(summary.d1.hasAccountId, true);
+    assert.equal(summary.d1.hasDatabaseId, true);
+    assert.equal(summary.d1.hasApiToken, true);
+    assert.equal("accountId" in summary.d1, false);
+    assert.equal("databaseId" in summary.d1, false);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
@@ -340,6 +350,202 @@ test("cloud-mode writes upsert local profiles into D1 without wiping remote-only
     assert.ok(ids.includes("openai-codex:other-device"), "must not have wiped the other device's profile");
     assert.ok(ids.includes("openai-codex:new-local"), "new local profile should have been upserted");
     assert.ok(ids.includes("openai-codex:local-one"), "existing local profile should still be present in D1");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("cloud-mode writes pull D1 first so deleted remote profiles do not get resurrected", async () => {
+  const { stateDir, localStateDir, codexAuthPath } = setupStateDir("codex-dashboard-cloud-prepull-");
+  try {
+    writeInitialStore(stateDir, {
+      "openai-codex:keeper": buildOauthProfile({
+        access: "keeper-access",
+        refresh: "keeper-refresh",
+        expires: Date.now() + 60_000,
+        email: "keeper@example.com",
+      }),
+      "openai-codex:stale-local": buildOauthProfile({
+        access: "stale-access",
+        refresh: "stale-refresh",
+        expires: Date.now() + 60_000,
+        email: "stale@example.com",
+      }),
+    }, ["openai-codex:keeper", "openai-codex:stale-local"]);
+
+    const mock = new MockD1();
+    mock.profiles.set("openai-codex:keeper", {
+      provider: "openai-codex",
+      email: "keeper@example.com",
+      chatgpt_user_id: null,
+      account_id: null,
+      expires_at: Date.now() + 120_000,
+      credential_blob: JSON.stringify({ type: "oauth", refresh: "keeper-refresh" }),
+      credential_blob_iv: null,
+      credential_blob_salt: null,
+      is_encrypted: 0,
+      version: 1,
+      updated_at: Date.now(),
+      updated_by: "other-device",
+    });
+    saveDashboardConfig({ localStateDir }, {
+      cloudKnownProfileIds: ["openai-codex:keeper", "openai-codex:stale-local"],
+    });
+
+    await runWithCloudMock(mock, localStateDir, async () => {
+      await saveLoggedInProfile(
+        { stateDir, localStateDir, agent: "main", codexAuthPath },
+        "openai-codex:new-local",
+        {
+          access: "new-access",
+          refresh: "new-refresh",
+          expires: Date.now() + 60_000,
+          accountId: "acc-new",
+          email: "new@example.com",
+          authMode: "chatgpt",
+          idToken: "new-id-token",
+          lastRefresh: new Date().toISOString(),
+        },
+      );
+    });
+
+    const snapshot = mock.snapshot();
+    const ids = snapshot.profiles.map((row) => row.id).sort();
+    assert.deepEqual(ids, ["openai-codex:keeper", "openai-codex:new-local"]);
+
+    const localStore = JSON.parse(fs.readFileSync(path.join(localStateDir, "auth-store.json"), "utf8"));
+    assert.equal(localStore.profiles["openai-codex:stale-local"], undefined);
+    assert.ok(localStore.profiles["openai-codex:new-local"]);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("pullCloudStoreIntoLocal preserves local meta and does not write local meta back to D1", async () => {
+  const { stateDir, localStateDir, codexAuthPath } = setupStateDir("codex-dashboard-cloud-manual-pull-");
+  try {
+    writeInitialStore(stateDir, {
+      "openai-codex:local-first": buildOauthProfile({
+        access: "local-first-access",
+        refresh: "local-first-refresh",
+        expires: Date.now() + 60_000,
+        email: "local-first@example.com",
+      }),
+    }, ["openai-codex:local-first"]);
+
+    const localAuthStorePath = path.join(localStateDir, "auth-store.json");
+    writeAuthStore(localAuthStorePath, {
+      profiles: {
+        "openai-codex:local-first": buildOauthProfile({
+          access: "local-first-access",
+          refresh: "local-first-refresh",
+          expires: Date.now() + 60_000,
+          email: "local-first@example.com",
+        }),
+      },
+      order: { "openai-codex": ["openai-codex:local-first"] },
+      lastGood: { "openai-codex": "openai-codex:local-first" },
+      usageStats: {
+        "openai-codex:local-first": { totalRequests: 7 },
+      },
+      maintenance: {
+        lastAttemptAt: "2026-04-20T10:00:00.000Z",
+        lastSuccessAt: "2026-04-20T10:00:00.000Z",
+        lastError: "local-error",
+        lastChangedProfileIds: ["openai-codex:local-first"],
+        lastRefreshByProfileId: {
+          "openai-codex:local-first": "2026-04-20T10:00:00.000Z",
+        },
+      },
+    });
+
+    const mock = new MockD1();
+    mock.profiles.set("openai-codex:local-first", {
+      provider: "openai-codex",
+      email: "remote-local-first@example.com",
+      chatgpt_user_id: null,
+      account_id: null,
+      expires_at: Date.now() + 120_000,
+      credential_blob: JSON.stringify({ type: "oauth", refresh: "remote-local-first-refresh" }),
+      credential_blob_iv: null,
+      credential_blob_salt: null,
+      is_encrypted: 0,
+      version: 1,
+      updated_at: Date.now(),
+      updated_by: "remote-device",
+    });
+    mock.profiles.set("openai-codex:remote-added", {
+      provider: "openai-codex",
+      email: "remote-added@example.com",
+      chatgpt_user_id: null,
+      account_id: null,
+      expires_at: Date.now() + 120_000,
+      credential_blob: JSON.stringify({ type: "oauth", refresh: "remote-added-refresh" }),
+      credential_blob_iv: null,
+      credential_blob_salt: null,
+      is_encrypted: 0,
+      version: 1,
+      updated_at: Date.now(),
+      updated_by: "remote-device",
+    });
+    mock.storeMeta.set("order", {
+      meta_value: JSON.stringify({ "openai-codex": ["openai-codex:remote-added", "openai-codex:local-first"] }),
+      version: 1,
+      updated_at: Date.now(),
+      updated_by: "remote-device",
+    });
+    mock.storeMeta.set("lastGood", {
+      meta_value: JSON.stringify({ "openai-codex": "openai-codex:remote-added" }),
+      version: 1,
+      updated_at: Date.now(),
+      updated_by: "remote-device",
+    });
+    mock.storeMeta.set("usageStats", {
+      meta_value: JSON.stringify({
+        "openai-codex:remote-added": { totalRequests: 99 },
+      }),
+      version: 1,
+      updated_at: Date.now(),
+      updated_by: "remote-device",
+    });
+    mock.storeMeta.set("maintenance", {
+      meta_value: JSON.stringify({
+        lastAttemptAt: "2026-04-21T09:00:00.000Z",
+        lastSuccessAt: "2026-04-21T09:00:00.000Z",
+        lastError: "remote-error",
+        lastChangedProfileIds: ["openai-codex:remote-added"],
+        lastRefreshByProfileId: {
+          "openai-codex:remote-added": "2026-04-21T09:00:00.000Z",
+        },
+      }),
+      version: 1,
+      updated_at: Date.now(),
+      updated_by: "remote-device",
+    });
+
+    await runWithCloudMock(mock, localStateDir, async () => {
+      await pullCloudStoreIntoLocal(
+        { stateDir, localStateDir, agent: "main", codexAuthPath },
+      );
+    });
+
+    const localStore = JSON.parse(fs.readFileSync(localAuthStorePath, "utf8"));
+    assert.deepEqual(localStore.order["openai-codex"], [
+      "openai-codex:local-first",
+      "openai-codex:remote-added",
+    ]);
+    assert.equal(localStore.lastGood["openai-codex"], "openai-codex:local-first");
+    assert.equal(localStore.usageStats["openai-codex:local-first"].totalRequests, 7);
+    assert.equal(localStore.usageStats["openai-codex:remote-added"].totalRequests, 99);
+    assert.equal(localStore.maintenance.lastError, "local-error");
+    assert.equal(localStore.maintenance.lastRefreshByProfileId["openai-codex:remote-added"], "2026-04-21T09:00:00.000Z");
+    assert.ok(localStore.profiles["openai-codex:remote-added"]);
+
+    assert.deepEqual(
+      JSON.parse(mock.storeMeta.get("order").meta_value),
+      { "openai-codex": ["openai-codex:remote-added", "openai-codex:local-first"] },
+      "manual pull should not overwrite D1 order meta",
+    );
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
   }
