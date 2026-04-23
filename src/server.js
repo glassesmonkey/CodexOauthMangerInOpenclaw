@@ -4,22 +4,27 @@ import {
   LoginManager,
   absorbOpenClawRuntime,
   applyOrder,
+  bootstrapCloudStore,
   bootstrapLocalStore,
+  cloudHealth,
   commitImportBundle,
   cleanupDuplicateProfiles,
   deleteProfile,
   deleteProfiles,
   exportBundle,
+  getStoreConfig,
   linkCurrentCodexToProfile,
   loadDashboardState,
   loadTokenExpirySnapshot,
   previewImportBundle,
+  pullCloudStoreIntoLocal,
   renameProfile,
   rebuildRuntime,
   runTokenKeepalive,
   switchCodexProfile,
   switchProfile,
   syncConfig,
+  updateStoreConfig,
 } from "./state.js";
 import { renderHtml } from "./ui.js";
 import { createUsageFetch } from "./usage-fetch.js";
@@ -95,6 +100,50 @@ export async function startDashboardServer(options = {}) {
 
       if (request.method === "GET" && url.pathname === "/api/token-expiry") {
         sendJson(response, 200, await loadTokenExpirySnapshot(options));
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/config/store") {
+        sendJson(response, 200, getStoreConfig(options));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/config/store") {
+        const body = await readBody(request);
+        try {
+          sendJson(response, 200, updateStoreConfig(options, body));
+        } catch (error) {
+          sendJson(response, 400, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/d1/health") {
+        sendJson(response, 200, await cloudHealth(options));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/d1/bootstrap") {
+        try {
+          sendJson(response, 200, await bootstrapCloudStore(options));
+        } catch (error) {
+          sendJson(response, 400, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/d1/pull") {
+        try {
+          sendJson(response, 200, await pullCloudStoreIntoLocal(options));
+        } catch (error) {
+          sendJson(response, 400, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
         return;
       }
 
