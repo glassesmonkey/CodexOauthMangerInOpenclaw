@@ -672,7 +672,6 @@ export function renderHtml() {
 
       .spotlight-grid {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 12px;
         margin-top: 14px;
       }
@@ -814,6 +813,7 @@ export function renderHtml() {
         flex-wrap: wrap;
         justify-content: flex-end;
         gap: 6px;
+        max-width: 58%;
       }
 
       .quota-board-detail-empty {
@@ -3678,6 +3678,7 @@ export function renderHtml() {
         const emptyText = typeof options.emptyText === "string" && options.emptyText ? options.emptyText : "当前没有可展示的账号。";
         const primaryLabel = typeof options.primaryLabel === "string" && options.primaryLabel ? options.primaryLabel : "5h";
         const secondaryLabel = typeof options.secondaryLabel === "string" && options.secondaryLabel ? options.secondaryLabel : "7d";
+        const showSecondaryReset = options.showSecondaryReset !== false;
 
         listNode.innerHTML = "";
         const count = Array.isArray(windowSummary?.segments) ? windowSummary.segments.length : 0;
@@ -3719,6 +3720,16 @@ export function renderHtml() {
               getQuotaBadgeTone(segment.secondaryRemainingPercent),
             ),
           );
+          if (showSecondaryReset) {
+            values.appendChild(
+              createInfoPill(
+                segment.secondaryResetAt
+                  ? "7d 重置 " + formatCountdown(segment.secondaryResetAt).text.replace(/^倒计时 /, "")
+                  : "7d 重置未知",
+                segment.secondaryResetAt ? "info" : "warn",
+              ),
+            );
+          }
           row.appendChild(values);
 
           fragment.appendChild(row);

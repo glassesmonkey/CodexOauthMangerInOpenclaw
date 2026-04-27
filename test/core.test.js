@@ -3458,6 +3458,8 @@ test("buildQuotaBoardSummary aggregates total remaining quota across readable ac
   assert.equal(Math.round(summary.secondary.segments[1].sharePercent), 40);
   assert.equal(Math.round(summary.primary.segments[0].sharePercent), 25);
   assert.equal(Math.round(summary.primary.segments[1].sharePercent), 13);
+  assert.equal(summary.secondary.segments[0].secondaryResetAt, 1_710_000_000_000);
+  assert.equal(summary.primary.segments[0].secondaryResetAt, 1_710_000_000_000);
 });
 
 test("buildQuotaBoardSummary excludes unreadable accounts from capacity", () => {

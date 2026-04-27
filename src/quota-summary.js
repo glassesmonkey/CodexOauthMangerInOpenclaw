@@ -67,6 +67,8 @@ export function buildQuotaBoardSummary(
         remainingPercent,
         primaryRemainingPercent: normalizeRemainingPercent(row?.primary),
         secondaryRemainingPercent: normalizeRemainingPercent(row?.secondary),
+        primaryResetAt: normalizeResetAt(row?.primary),
+        secondaryResetAt: normalizeResetAt(row?.secondary),
         sharePercent: 0,
       });
     }
