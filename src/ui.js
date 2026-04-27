@@ -169,7 +169,7 @@ export function renderHtml() {
         z-index: 1;
         max-width: 1480px;
         margin: 0 auto;
-        padding: 34px 24px 56px;
+        padding: 24px 24px 44px;
       }
 
       .card {
@@ -201,7 +201,7 @@ export function renderHtml() {
 
       .masthead {
         overflow: visible;
-        padding: 32px;
+        padding: 24px;
         background:
           linear-gradient(140deg, rgba(37, 24, 18, 0.95), rgba(55, 33, 23, 0.88)),
           linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
@@ -213,8 +213,8 @@ export function renderHtml() {
         position: relative;
         z-index: 1;
         display: grid;
-        gap: 24px;
-        grid-template-columns: minmax(0, 1fr) minmax(340px, 430px);
+        gap: 18px;
+        grid-template-columns: minmax(0, 1fr) minmax(360px, 460px);
         align-items: start;
       }
 
@@ -222,29 +222,29 @@ export function renderHtml() {
         content: "CONTROL ROOM";
         position: absolute;
         right: 28px;
-        top: 18px;
+        top: 12px;
         font-family: var(--display);
-        font-size: clamp(2.8rem, 10vw, 7rem);
+        font-size: clamp(2.4rem, 8vw, 5.4rem);
         line-height: 0.9;
         letter-spacing: 0.04em;
-        color: rgba(255, 245, 234, 0.06);
+        color: rgba(255, 245, 234, 0.045);
         pointer-events: none;
       }
 
       .brand-panel {
         display: grid;
-        gap: 20px;
+        gap: 14px;
         grid-template-columns: auto minmax(0, 1fr);
-        align-items: start;
+        align-items: center;
       }
 
       .brand-mark {
         display: grid;
         place-items: center;
-        width: 72px;
-        height: 72px;
-        padding: 8px;
-        border-radius: 18px;
+        width: 56px;
+        height: 56px;
+        padding: 7px;
+        border-radius: 16px;
         background: linear-gradient(180deg, rgba(255, 248, 238, 0.16), rgba(255, 248, 238, 0.04));
         border: 1px solid rgba(255, 244, 227, 0.2);
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -257,8 +257,8 @@ export function renderHtml() {
       }
 
       .eyebrow {
-        margin: 0 0 6px;
-        font-size: 0.78rem;
+        margin: 0 0 4px;
+        font-size: 0.72rem;
         letter-spacing: 0.16em;
         text-transform: uppercase;
         color: rgba(248, 239, 227, 0.72);
@@ -274,9 +274,10 @@ export function renderHtml() {
       }
 
       h1 {
-        font-size: clamp(2.6rem, 4.8vw, 4.4rem);
-        line-height: 0.92;
+        font-size: clamp(2rem, 3.6vw, 3.4rem);
+        line-height: 1;
         font-weight: 700;
+        letter-spacing: 0;
       }
 
       h2 {
@@ -293,34 +294,33 @@ export function renderHtml() {
       }
 
       .hero-note {
-        display: inline-flex;
+        display: block;
         align-items: center;
-        gap: 8px;
-        margin-top: 16px;
-        padding: 8px 12px;
-        border-radius: 999px;
-        border: 1px solid rgba(255, 235, 215, 0.18);
-        background: rgba(255, 244, 231, 0.08);
-        color: rgba(248, 239, 227, 0.78);
-        font-size: 0.8rem;
+        margin-top: 5px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: rgba(248, 239, 227, 0.54);
+        font-size: 0.72rem;
       }
 
       .hero-note strong {
-        color: #ffd8bc;
+        color: inherit;
+        font-weight: 600;
       }
 
       .toolbar-panel {
         position: relative;
         z-index: 4;
         display: grid;
-        gap: 14px;
+        gap: 0;
         justify-items: stretch;
       }
 
       .masthead-actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 8px;
         align-items: center;
         justify-content: flex-start;
       }
@@ -329,13 +329,13 @@ export function renderHtml() {
       .button-secondary,
       .button-ghost,
       .button-danger {
-        min-height: 40px;
-        padding: 11px 15px;
-        border-radius: 14px;
+        min-height: 36px;
+        padding: 9px 13px;
+        border-radius: 12px;
         border: 1px solid transparent;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-        font-size: 0.74rem;
+        font-size: 0.72rem;
         font-weight: 700;
         transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease, background 140ms ease, border-color 140ms ease, color 140ms ease;
       }
@@ -400,19 +400,40 @@ export function renderHtml() {
       }
 
       .toolbar-help-card {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        z-index: 20;
+        width: min(460px, calc(100vw - 48px));
         display: grid;
-        gap: 10px;
-        padding: 18px 18px 16px;
-        border-radius: 22px;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: start;
+        gap: 4px 10px;
+        padding: 10px 12px;
+        border-radius: 16px;
         border: 1px solid rgba(255, 236, 213, 0.12);
         background:
           linear-gradient(180deg, rgba(255, 249, 239, 0.08), rgba(255, 249, 239, 0.02)),
           rgba(255, 247, 236, 0.04);
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-4px);
+        transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+        visibility: hidden;
+      }
+
+      .toolbar-panel:hover .toolbar-help-card,
+      .toolbar-panel:focus-within .toolbar-help-card {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(0);
+        visibility: visible;
       }
 
       .toolbar-help-eyebrow {
-        font-size: 0.72rem;
+        display: none;
+        font-size: 0.66rem;
         letter-spacing: 0.16em;
         text-transform: uppercase;
         color: rgba(248, 239, 227, 0.54);
@@ -420,38 +441,48 @@ export function renderHtml() {
 
       .toolbar-help-title {
         color: #fff3e6;
-        font-size: 1.26rem;
-        line-height: 1;
+        font-size: 0.92rem;
+        line-height: 1.25;
+        white-space: nowrap;
       }
 
       .toolbar-help-copy {
         margin: 0;
         color: rgba(248, 239, 227, 0.82);
-        font-size: 0.9rem;
-        line-height: 1.55;
+        font-size: 0.76rem;
+        line-height: 1.35;
       }
 
       .toolbar-help-meta {
-        display: grid;
-        gap: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        grid-column: 1 / -1;
+        gap: 4px 12px;
       }
 
       .toolbar-help-meta-item {
-        display: grid;
-        gap: 4px;
+        display: inline-flex;
+        align-items: baseline;
+        gap: 6px;
+        min-width: 0;
       }
 
       .toolbar-help-meta-label {
-        font-size: 0.7rem;
+        font-size: 0.64rem;
         letter-spacing: 0.14em;
         text-transform: uppercase;
         color: rgba(248, 239, 227, 0.54);
+        white-space: nowrap;
       }
 
       .toolbar-help-meta-value {
         color: rgba(248, 239, 227, 0.88);
-        font-size: 0.82rem;
-        line-height: 1.45;
+        max-width: 210px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.72rem;
+        line-height: 1.3;
       }
 
       .toolbar-menu {
@@ -572,20 +603,25 @@ export function renderHtml() {
         position: relative;
         z-index: 0;
         display: grid;
-        gap: 16px;
+        align-items: start;
+        gap: 14px;
         grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.82fr);
-        margin-top: 24px;
+        margin-top: 18px;
       }
 
       .summary-card,
       .spotlight-card {
         position: relative;
-        padding: 24px;
-        border-radius: var(--radius-lg);
+        padding: 18px;
+        border-radius: 20px;
         border: 1px solid rgba(95, 68, 42, 0.14);
         background: var(--surface-strong);
         box-shadow: var(--shadow-soft);
         color: var(--text);
+      }
+
+      .summary-card {
+        height: fit-content;
       }
 
       .spotlight-card {
@@ -596,13 +632,14 @@ export function renderHtml() {
 
       .spotlight-head {
         display: grid;
-        gap: 10px;
+        gap: 8px;
       }
 
       .spotlight-name {
-        margin-top: 4px;
-        font-size: clamp(1.4rem, 2.6vw, 2rem);
-        line-height: 1.08;
+        margin-top: 3px;
+        font-size: clamp(1.25rem, 2vw, 1.7rem);
+        line-height: 1.1;
+        letter-spacing: 0;
         color: #3e2819;
         text-shadow: 0 1px 0 rgba(255, 255, 255, 0.38);
       }
@@ -617,8 +654,8 @@ export function renderHtml() {
 
       .spotlight-reason {
         margin: 0;
-        font-size: 0.88rem;
-        line-height: 1.45;
+        font-size: 0.82rem;
+        line-height: 1.4;
         color: var(--muted);
       }
 
@@ -630,20 +667,21 @@ export function renderHtml() {
       }
 
       .tag-row {
-        margin-top: 12px;
+        margin-top: 10px;
       }
 
       .spotlight-grid {
         display: grid;
-        gap: 16px;
-        margin-top: 18px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 14px;
       }
 
       .quota-board-window {
         display: grid;
-        gap: 10px;
-        padding: 16px 18px;
-        border-radius: 20px;
+        gap: 8px;
+        padding: 13px 14px;
+        border-radius: 16px;
         border: 1px solid rgba(95, 68, 42, 0.12);
         background: rgba(255, 255, 255, 0.48);
       }
@@ -656,14 +694,14 @@ export function renderHtml() {
       }
 
       .quota-board-window-label {
-        font-size: 0.82rem;
+        font-size: 0.74rem;
         letter-spacing: 0.08em;
         text-transform: uppercase;
         color: var(--muted);
       }
 
       .quota-board-window-value {
-        font-size: clamp(1.15rem, 2vw, 1.5rem);
+        font-size: clamp(1rem, 1.5vw, 1.25rem);
         font-weight: 700;
         color: #3e2819;
       }
@@ -673,7 +711,7 @@ export function renderHtml() {
         overflow: hidden;
         display: flex;
         width: 100%;
-        min-height: 18px;
+        min-height: 14px;
         border-radius: 999px;
         background: rgba(32, 22, 15, 0.08);
         border: 1px solid rgba(95, 68, 42, 0.1);
@@ -716,16 +754,16 @@ export function renderHtml() {
       }
 
       .quota-board-details {
-        margin-top: 2px;
+        margin-top: 0;
         border-top: 1px dashed rgba(95, 68, 42, 0.14);
-        padding-top: 10px;
+        padding-top: 8px;
       }
 
       .quota-board-details summary {
         cursor: pointer;
         list-style: none;
         color: var(--info);
-        font-size: 0.8rem;
+        font-size: 0.76rem;
         font-weight: 600;
       }
 
@@ -2254,7 +2292,9 @@ export function renderHtml() {
         }
 
         .brand-panel {
-          grid-template-columns: 1fr;
+          grid-template-columns: auto minmax(0, 1fr);
+          gap: 12px;
+          align-items: center;
         }
 
         .masthead::before {
@@ -2264,8 +2304,8 @@ export function renderHtml() {
         }
 
         .brand-mark {
-          width: 64px;
-          height: 64px;
+          width: 48px;
+          height: 48px;
         }
 
         .profile-list,
