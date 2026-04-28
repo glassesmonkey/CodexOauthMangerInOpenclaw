@@ -219,21 +219,12 @@ export function renderHtml() {
       }
 
       .masthead::before {
-        content: "CONTROL ROOM";
-        position: absolute;
-        right: 28px;
-        top: 12px;
-        font-family: var(--display);
-        font-size: clamp(2.4rem, 8vw, 5.4rem);
-        line-height: 0.9;
-        letter-spacing: 0.04em;
-        color: rgba(255, 245, 234, 0.045);
-        pointer-events: none;
+        display: none;
       }
 
       .brand-panel {
         display: grid;
-        gap: 14px;
+        gap: 10px;
         grid-template-columns: auto minmax(0, 1fr);
         align-items: center;
       }
@@ -241,10 +232,10 @@ export function renderHtml() {
       .brand-mark {
         display: grid;
         place-items: center;
-        width: 56px;
-        height: 56px;
-        padding: 7px;
-        border-radius: 16px;
+        width: 44px;
+        height: 44px;
+        padding: 6px;
+        border-radius: 14px;
         background: linear-gradient(180deg, rgba(255, 248, 238, 0.16), rgba(255, 248, 238, 0.04));
         border: 1px solid rgba(255, 244, 227, 0.2);
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -257,9 +248,9 @@ export function renderHtml() {
       }
 
       .eyebrow {
-        margin: 0 0 4px;
-        font-size: 0.72rem;
-        letter-spacing: 0.16em;
+        margin: 0;
+        font-size: 0.68rem;
+        letter-spacing: 0.14em;
         text-transform: uppercase;
         color: rgba(248, 239, 227, 0.72);
       }
@@ -274,10 +265,13 @@ export function renderHtml() {
       }
 
       h1 {
-        font-size: clamp(2rem, 3.6vw, 3.4rem);
-        line-height: 1;
+        margin-top: 2px;
+        font-family: var(--sans);
+        font-size: 0.86rem;
+        line-height: 1.2;
         font-weight: 700;
         letter-spacing: 0;
+        color: rgba(248, 239, 227, 0.9);
       }
 
       h2 {
@@ -294,7 +288,7 @@ export function renderHtml() {
       }
 
       .hero-note {
-        display: block;
+        display: none;
         align-items: center;
         margin-top: 5px;
         padding: 0;
@@ -2469,7 +2463,7 @@ export function renderHtml() {
             <div class="brand-mark">${HEADER_LOGO_SVG}</div>
             <div>
               <p class="eyebrow">Codex Accounts</p>
-              <h1>一眼看清哪个账号还能用</h1>
+              <h1>账号仪表盘</h1>
               <div class="hero-note"><strong>仅本地</strong></div>
             </div>
           </div>
@@ -3838,13 +3832,6 @@ export function renderHtml() {
         return data.rows.find((row) => row.codexCurrent) || null;
       }
 
-      function getCodexRecommendedRow(data = appState.data) {
-        if (!data?.codexRecommendedProfileId || !Array.isArray(data.rows)) {
-          return null;
-        }
-        return data.rows.find((row) => row.profileId === data.codexRecommendedProfileId) || null;
-      }
-
       function isSharedCodexAutomationMode() {
         return appState.codexAutomationMode === "shared";
       }
@@ -4737,22 +4724,6 @@ export function renderHtml() {
         return parts.join(" · ") || "额度未知";
       }
 
-      function humanizeSystemNote(note) {
-        if (!note) {
-          return "";
-        }
-        if (note.includes("Applying order updates")) {
-          return "应用推荐会更新 OpenClaw 和 Hermes 投影；只有显式要求同步时才会改写 Codex 当前账号。";
-        }
-        if (note.includes("Setting a profile as current")) {
-          return "“设为当前”会切换 OpenClaw 当前账号，并在兼容时同步 Hermes 和 Codex。";
-        }
-        if (note.includes("project-local store is the canonical source of truth")) {
-          return "项目本地号池是真源，OpenClaw、Hermes 和 Codex 文件都只是导出结果。";
-        }
-        return note;
-      }
-
       function humanizeWarning(note) {
         if (!note) {
           return "";
@@ -4943,33 +4914,6 @@ export function renderHtml() {
         ]);
       }
 
-      function createCodexRecommendationAlertCard(data) {
-        const row = getCodexRecommendedRow(data);
-        if (!row) {
-          if (!data?.codexRecommendedBlockedReason) {
-            return null;
-          }
-          return createAlertCard("Codex 推荐", "warn", [
-            data.codexRecommendedBlockedReason,
-            "当前不会自动切换 Codex",
-          ]);
-        }
-
-        const tone = data?.codexAutoSwitchSuggested
-          ? "warn"
-          : data?.codexWouldDivergeFromOpenClaw
-            ? "info"
-            : "ok";
-        const detail = data?.codexAutoSwitchReason
-          || (data?.codexWouldDivergeFromOpenClaw
-            ? "已与 OpenClaw 推荐拆开，给 Codex 预留独立账号。"
-            : "当前 Codex 推荐与 OpenClaw 一致。");
-        return createAlertCard("Codex 推荐", tone, [
-          (row.displayLabel || row.profileId) + " · " + row.profileId,
-          detail,
-        ]);
-      }
-
       function createCodexRestartAlertCard() {
         if (!needsCodexRestartBanner()) {
           return null;
@@ -5141,11 +5085,6 @@ export function renderHtml() {
 
         cards.push(createSelectionStatusAlertCard(data));
 
-        const codexRecommendationCard = createCodexRecommendationAlertCard(data);
-        if (codexRecommendationCard) {
-          cards.push(codexRecommendationCard);
-        }
-
         const tokenReminderCard = createTokenReminderAlertCard();
         if (tokenReminderCard) {
           cards.push(tokenReminderCard);
@@ -5158,10 +5097,6 @@ export function renderHtml() {
 
         if (data?.warnings?.length) {
           cards.push(createAlertCard("提醒", "warn", [String(data.warnings.length) + " 项待处理"]));
-        }
-
-        if (data?.notes?.length) {
-          cards.push(createAlertCard("说明", "ok", [humanizeSystemNote(data.notes[0])]));
         }
 
         if (!cards.length) {
