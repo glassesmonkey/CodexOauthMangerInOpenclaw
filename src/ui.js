@@ -609,6 +609,12 @@ export function renderHtml() {
         margin-top: 18px;
       }
 
+      .summary-side {
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+      }
+
       .summary-card,
       .spotlight-card {
         position: relative;
@@ -1039,8 +1045,20 @@ export function renderHtml() {
         background: rgba(255, 245, 244, 0.9);
       }
 
+      .summary-side .flash-banner {
+        margin-top: 0;
+        padding: 11px 13px;
+        border-radius: 16px;
+        font-size: 0.8rem;
+      }
+
       .overview-rail {
         margin-top: 14px;
+      }
+
+      .summary-side .overview-rail {
+        margin-top: 0;
+        min-width: 0;
       }
 
       .alert-grid {
@@ -1060,6 +1078,13 @@ export function renderHtml() {
         border-radius: 999px;
       }
 
+      .summary-side .alert-grid {
+        display: grid;
+        gap: 8px;
+        overflow: visible;
+        scroll-snap-type: none;
+      }
+
       .alert-card {
         flex: 0 0 auto;
         display: inline-flex;
@@ -1073,6 +1098,16 @@ export function renderHtml() {
         box-shadow: none;
         animation: rise 240ms ease;
         scroll-snap-align: start;
+      }
+
+      .summary-side .alert-card {
+        flex: none;
+        align-items: flex-start;
+        width: 100%;
+        min-width: 0;
+        min-height: 36px;
+        padding: 9px 12px;
+        border-radius: 16px;
       }
 
       .alert-card.warn {
@@ -1213,6 +1248,12 @@ export function renderHtml() {
         overflow: visible;
       }
 
+      .summary-side .alert-list {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+
       .alert-item {
         padding-left: 0;
         position: static;
@@ -1220,6 +1261,13 @@ export function renderHtml() {
         font-size: 0.8rem;
         line-height: 1;
         white-space: nowrap;
+      }
+
+      .summary-side .alert-item {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        line-height: 1.25;
       }
 
       .workspace {
@@ -2525,40 +2573,41 @@ export function renderHtml() {
             </div>
           </section>
 
-          <section class="summary-card">
-            <h3>概览</h3>
-            <div class="stat-grid compact">
-              <div class="stat-box emphasis total">
-                <div class="stat-label">账号数</div>
-                <div id="profilesCountValue" class="stat-value">-</div>
+          <div class="summary-side">
+            <section class="summary-card">
+              <h3>概览</h3>
+              <div class="stat-grid compact">
+                <div class="stat-box emphasis total">
+                  <div class="stat-label">账号数</div>
+                  <div id="profilesCountValue" class="stat-value">-</div>
+                </div>
+                <div class="stat-box emphasis depleted">
+                  <div class="stat-label">7 天已耗尽</div>
+                  <div id="depletedProfilesValue" class="stat-value">-</div>
+                </div>
+                <div class="stat-box emphasis available">
+                  <div class="stat-label">7 天还有额度</div>
+                  <div id="availableProfilesValue" class="stat-value">-</div>
+                </div>
               </div>
-              <div class="stat-box emphasis depleted">
-                <div class="stat-label">7 天已耗尽</div>
-                <div id="depletedProfilesValue" class="stat-value">-</div>
+              <div class="summary-meta">
+                <div class="summary-meta-item">
+                  <div class="stat-label">待处理提醒</div>
+                  <div id="warningsCountValue" class="summary-meta-value">-</div>
+                </div>
+                <div class="summary-meta-item">
+                  <div class="stat-label">下一次重置</div>
+                  <div id="nextResetValue" class="summary-meta-value">-</div>
+                </div>
               </div>
-              <div class="stat-box emphasis available">
-                <div class="stat-label">7 天还有额度</div>
-                <div id="availableProfilesValue" class="stat-value">-</div>
-              </div>
-            </div>
-            <div class="summary-meta">
-              <div class="summary-meta-item">
-                <div class="stat-label">待处理提醒</div>
-                <div id="warningsCountValue" class="summary-meta-value">-</div>
-              </div>
-              <div class="summary-meta-item">
-                <div class="stat-label">下一次重置</div>
-                <div id="nextResetValue" class="summary-meta-value">-</div>
-              </div>
-            </div>
-          </section>
+            </section>
+            <div id="flashBanner" class="flash-banner" hidden></div>
+            <section class="overview-rail">
+              <div id="alertsGrid" class="alert-grid"></div>
+            </section>
+          </div>
         </div>
       </header>
-
-      <div id="flashBanner" class="flash-banner" hidden></div>
-      <section class="overview-rail">
-        <div id="alertsGrid" class="alert-grid"></div>
-      </section>
 
       <div class="workspace">
         <section class="card tabbar-card">
