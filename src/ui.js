@@ -5848,6 +5848,7 @@ export function renderHtml() {
       function formatTokenRefreshOutcome(result, okMessage) {
         const checkedCount = Number.isFinite(result?.checkedCount) ? result.checkedCount : 0;
         const refreshedCount = Number.isFinite(result?.refreshedCount) ? result.refreshedCount : 0;
+        const recoveredFromHermesCount = Number.isFinite(result?.recoveredFromHermesCount) ? result.recoveredFromHermesCount : 0;
         const skippedTooEarlyCount = Number.isFinite(result?.skippedTooEarlyCount) ? result.skippedTooEarlyCount : 0;
         const skippedCooldownCount = Number.isFinite(result?.skippedCooldownCount) ? result.skippedCooldownCount : 0;
         const failedCount = Number.isFinite(result?.failedCount)
@@ -5865,6 +5866,9 @@ export function renderHtml() {
         }
         if (skippedCooldownCount > 0) {
           details.push(skippedCooldownCount + " 个冷却中");
+        }
+        if (recoveredFromHermesCount > 0) {
+          details.push("从 Hermes 吸收 " + recoveredFromHermesCount + " 个");
         }
         if (failedCount > 0) {
           details.push(failedCount + " 个失败");

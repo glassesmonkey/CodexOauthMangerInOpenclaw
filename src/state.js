@@ -1904,6 +1904,67 @@ export async function applyOrder(options, order, deps = {}) {
 // refresh_token_reused.
 const activeKeepaliveByStorePath = new Map();
 
+function isRefreshTokenReusedError(error) {
+  return /refresh_token_reused/i.test(toErrorMessage(error));
+}
+
+function mergeHermesRecoveryCredential(existing, hermesCredential) {
+  const existingCodexAuth = isRecord(existing?.codexAuth) ? existing.codexAuth : null;
+  const hermesCodexAuth = isRecord(hermesCredential?.codexAuth) ? hermesCredential.codexAuth : null;
+  return {
+    ...hermesCredential,
+    codexAuth: mergeDefinedRecord(hermesCodexAuth, existingCodexAuth) ?? existing?.codexAuth,
+  };
+}
+
+function selectHermesRecoveryCredential(context, profileId, credential) {
+  if (!context.hermesAuthExists) {
+    return { credential: null, error: "Hermes auth.json does not exist." };
+  }
+
+  const hermesProfiles = extractHermesManagedProfiles(readHermesAuthFile(context.hermesAuthPath));
+  const exactProfile = hermesProfiles.find((entry) => entry.profileId === profileId);
+  if (exactProfile) {
+    return { credential: exactProfile.credential, error: null };
+  }
+
+  const identityMatches = hermesProfiles.filter((entry) => credentialsShareIdentity(entry.credential, credential));
+  if (identityMatches.length === 1) {
+    return { credential: identityMatches[0].credential, error: null };
+  }
+  if (identityMatches.length > 1) {
+    return { credential: null, error: "Hermes has multiple matching Codex credentials." };
+  }
+  return { credential: null, error: "Hermes has no matching Codex credential." };
+}
+
+function tryRecoverRefreshTokenReuseFromHermes(context, profileId, credential) {
+  try {
+    const selected = selectHermesRecoveryCredential(context, profileId, credential);
+    if (!selected.credential) {
+      return { recovered: false, error: selected.error };
+    }
+
+    assertMatchingProfileIdentity(profileId, credential, selected.credential);
+    const localExpiresAt = resolveExpiresAt(credential);
+    const hermesExpiresAt = resolveExpiresAt(selected.credential);
+    if (!Number.isFinite(localExpiresAt) || !Number.isFinite(hermesExpiresAt)) {
+      return { recovered: false, error: "Hermes recovery requires comparable token expiry times." };
+    }
+    if (hermesExpiresAt <= localExpiresAt) {
+      return { recovered: false, error: "Hermes credential is not newer than the local credential." };
+    }
+
+    return {
+      recovered: true,
+      credential: mergeHermesRecoveryCredential(credential, selected.credential),
+      error: null,
+    };
+  } catch (error) {
+    return { recovered: false, error: toErrorMessage(error) };
+  }
+}
+
 async function doRunTokenKeepalive(options, deps = {}) {
   const context = resolvePaths(options);
   ensureLocalStoreInitialized(context);
@@ -1915,6 +1976,8 @@ async function doRunTokenKeepalive(options, deps = {}) {
   const failedProfiles = [];
   const changedProfileIds = [];
   const leaseSkippedProfiles = [];
+  const hermesRecoveredProfileIds = [];
+  const hermesRecoveryFailedProfiles = [];
   let checkedCount = 0;
   let skippedTooEarlyCount = 0;
   let skippedCooldownCount = 0;
@@ -1997,6 +2060,31 @@ async function doRunTokenKeepalive(options, deps = {}) {
         }
       }
     } catch (error) {
+      if (isRefreshTokenReusedError(error)) {
+        const recovery = tryRecoverRefreshTokenReuseFromHermes(context, entry.profileId, entry.credential);
+        if (recovery.recovered) {
+          try {
+            nextStore.profiles[entry.profileId] = mergeRefreshedCredential(nextStore.profiles[entry.profileId], recovery.credential);
+            changedProfileIds.push(entry.profileId);
+            hermesRecoveredProfileIds.push(entry.profileId);
+            lastRefreshByProfileId[entry.profileId] = attemptedAt;
+            if (cloudEnabled) {
+              await pushProfileCloudUpdate(options, entry.profileId, nextStore.profiles[entry.profileId]);
+            }
+            continue;
+          } catch (recoveryError) {
+            hermesRecoveryFailedProfiles.push({
+              profileId: entry.profileId,
+              error: toErrorMessage(recoveryError),
+            });
+          }
+        } else {
+          hermesRecoveryFailedProfiles.push({
+            profileId: entry.profileId,
+            error: recovery.error,
+          });
+        }
+      }
       failedProfiles.push({
         profileId: entry.profileId,
         error: toErrorMessage(error),
@@ -2043,6 +2131,9 @@ async function doRunTokenKeepalive(options, deps = {}) {
     changedProfileIds,
     failedProfiles,
     leaseSkippedProfiles,
+    recoveredFromHermesCount: hermesRecoveredProfileIds.length,
+    hermesRecoveredProfileIds,
+    hermesRecoveryFailedProfiles,
     exportedRuntime,
     storeMode: cloudContext.config.storeMode,
     cloudPrePullError,

@@ -40,6 +40,25 @@ function setupStateDir(prefix) {
   return { stateDir, localStateDir, codexAuthPath };
 }
 
+function createJwt(payload) {
+  const encodedHeader = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${encodedHeader}.${encodedPayload}.signature`;
+}
+
+function createOpenAIAccessToken({ exp, accountId, userId, email }) {
+  return createJwt({
+    exp,
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: accountId,
+      chatgpt_user_id: userId,
+    },
+    "https://api.openai.com/profile": {
+      email,
+    },
+  });
+}
+
 function writeInitialStore(stateDir, profiles, order) {
   const localAuthStorePath = path.join(stateDir, ".local", "auth-store.json");
   writeAuthStore(localAuthStorePath, {
@@ -82,6 +101,29 @@ function configureCloudMode(localStateDir, mock) {
     },
     deviceId: "device-under-test",
   });
+}
+
+function writeHermesManagedProfile(hermesAuthPath, profileId, credential) {
+  fs.mkdirSync(path.dirname(hermesAuthPath), { recursive: true });
+  fs.writeFileSync(hermesAuthPath, JSON.stringify({
+    version: 1,
+    active_provider: "openai-codex",
+    credential_pool: {
+      "openai-codex": [
+        {
+          id: "managed-test",
+          label: credential.email || profileId,
+          auth_type: "oauth",
+          priority: 0,
+          source: `manual:dashboard:${profileId}`,
+          access_token: credential.access,
+          refresh_token: credential.refresh,
+          last_refresh: credential.codexAuth?.lastRefresh,
+          base_url: "https://chatgpt.com/backend-api/codex",
+        },
+      ],
+    },
+  }, null, 2));
 }
 
 test("store-crypto: round-trips a JSON value with passphrase", () => {
@@ -296,6 +338,77 @@ function runWithCloudMock(mock, localStateDir, work) {
     globalThis.fetch = originalFetch;
   });
 }
+
+test("runTokenKeepalive pushes Hermes recovery to D1 in cloud mode", async () => {
+  const { stateDir, localStateDir, codexAuthPath } = setupStateDir("codex-dashboard-keepalive-hermes-cloud-");
+  const hermesHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-hermes-home-"));
+  const hermesAuthPath = path.join(hermesHome, "auth.json");
+  const profileId = "openai-codex:seat";
+  const accountId = "account-seat";
+  const userId = "user-seat";
+  const email = "seat@example.com";
+  const oldAccess = createOpenAIAccessToken({
+    exp: Math.floor(Date.now() / 1000) - 60,
+    accountId,
+    userId,
+    email,
+  });
+  const hermesAccess = createOpenAIAccessToken({
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    accountId,
+    userId,
+    email,
+  });
+
+  try {
+    writeInitialStore(stateDir, {
+      [profileId]: buildOauthProfile({
+        access: oldAccess,
+        refresh: "old-refresh",
+        expires: Date.now() - 60_000,
+        email,
+        accountId,
+      }),
+    }, [profileId]);
+    writeHermesManagedProfile(hermesAuthPath, profileId, buildOauthProfile({
+      access: hermesAccess,
+      refresh: "hermes-refresh",
+      expires: Date.now() + 60 * 60 * 1_000,
+      email,
+      accountId,
+    }));
+
+    const mock = new MockD1();
+    let result;
+    await runWithCloudMock(mock, localStateDir, async () => {
+      result = await runTokenKeepalive(
+        { stateDir, localStateDir, agent: "main", codexAuthPath, hermesHome },
+        {
+          refreshImpl: async () => {
+            throw new Error(
+              "Failed to refresh OpenAI Codex token: HTTP 401 Unauthorized refresh_token_reused: already used",
+            );
+          },
+        },
+      );
+    });
+
+    assert.equal(result.storeMode, "cloud");
+    assert.equal(result.failedCount, 0);
+    assert.equal(result.recoveredFromHermesCount, 1);
+    assert.deepEqual(result.changedProfileIds, [profileId]);
+
+    const snapshot = mock.snapshot();
+    const row = snapshot.profiles.find((entry) => entry.id === profileId);
+    assert.ok(row, "recovered profile should have been pushed to D1");
+    const credential = JSON.parse(row.credential_blob);
+    assert.equal(credential.access, hermesAccess);
+    assert.equal(credential.refresh, "hermes-refresh");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+    fs.rmSync(hermesHome, { recursive: true, force: true });
+  }
+});
 
 test("cloud-mode writes upsert local profiles into D1 without wiping remote-only rows", async () => {
   const { stateDir, localStateDir, codexAuthPath } = setupStateDir("codex-dashboard-cloud-upsert-");

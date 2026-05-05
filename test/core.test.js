@@ -44,6 +44,19 @@ function createJwt(payload) {
   return `${encodedHeader}.${encodedPayload}.signature`;
 }
 
+function createOpenAIAccessToken({ exp, accountId, userId, email }) {
+  return createJwt({
+    exp,
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: accountId,
+      chatgpt_user_id: userId,
+    },
+    "https://api.openai.com/profile": {
+      email,
+    },
+  });
+}
+
 function restoreProxyEnv(originalEnv) {
   if (typeof originalEnv.HTTPS_PROXY === "string") {
     process.env.HTTPS_PROXY = originalEnv.HTTPS_PROXY;
@@ -73,6 +86,29 @@ function writeLocalStore(stateDir, store) {
   const localAuthStorePath = path.join(stateDir, ".local", "auth-store.json");
   writeAuthStore(localAuthStorePath, store);
   return localAuthStorePath;
+}
+
+function writeHermesManagedProfile(hermesAuthPath, profileId, credential) {
+  fs.mkdirSync(path.dirname(hermesAuthPath), { recursive: true });
+  fs.writeFileSync(hermesAuthPath, JSON.stringify({
+    version: 1,
+    active_provider: "openai-codex",
+    credential_pool: {
+      "openai-codex": [
+        {
+          id: "managed-test",
+          label: credential.email || profileId,
+          auth_type: "oauth",
+          priority: 0,
+          source: `manual:dashboard:${profileId}`,
+          access_token: credential.access,
+          refresh_token: credential.refresh,
+          last_refresh: credential.codexAuth?.lastRefresh,
+          base_url: "https://chatgpt.com/backend-api/codex",
+        },
+      ],
+    },
+  }, null, 2));
 }
 
 function createOauthProfile({
@@ -3278,6 +3314,221 @@ test("resolveCredentialToken surfaces OpenAI OAuth error detail when refresh fai
     );
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("runTokenKeepalive recovers refresh_token_reused from a newer Hermes managed profile", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-keepalive-hermes-recover-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const hermesAuthPath = path.join(activeTestHermesHome, "auth.json");
+  const profileId = "openai-codex:seat";
+  const accountId = "account-seat";
+  const userId = "user-seat";
+  const email = "seat@example.com";
+  const oldAccess = createOpenAIAccessToken({
+    exp: Math.floor(Date.now() / 1000) - 60,
+    accountId,
+    userId,
+    email,
+  });
+  const hermesAccess = createOpenAIAccessToken({
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    accountId,
+    userId,
+    email,
+  });
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      [profileId]: createOauthProfile({
+        access: oldAccess,
+        refresh: "old-refresh",
+        accountId,
+        email,
+        expires: Date.now() - 60_000,
+        codexAuth: {
+          authMode: "chatgpt",
+          idToken: "keep-this-id-token",
+          lastRefresh: "2026-04-02T18:02:46.501Z",
+        },
+      }),
+    },
+    order: {
+      "openai-codex": [profileId],
+    },
+  });
+  writeHermesManagedProfile(hermesAuthPath, profileId, createOauthProfile({
+    access: hermesAccess,
+    refresh: "hermes-refresh",
+    accountId,
+    email,
+    expires: Date.now() + 60 * 60 * 1_000,
+    codexAuth: {
+      authMode: "chatgpt",
+      lastRefresh: "2026-05-05T03:15:42.976Z",
+    },
+  }));
+
+  try {
+    const result = await runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        refreshImpl: async () => {
+          throw new Error(
+            "Failed to refresh OpenAI Codex token: HTTP 401 Unauthorized refresh_token_reused: already used",
+          );
+        },
+      },
+    );
+
+    assert.equal(result.failedCount, 0);
+    assert.equal(result.refreshedCount, 1);
+    assert.equal(result.recoveredFromHermesCount, 1);
+    assert.deepEqual(result.hermesRecoveredProfileIds, [profileId]);
+    assert.deepEqual(result.hermesRecoveryFailedProfiles, []);
+    assert.deepEqual(result.changedProfileIds, [profileId]);
+
+    const localStore = readAuthStore(path.join(localStateDir, "auth-store.json"));
+    const recovered = localStore.profiles[profileId];
+    assert.equal(recovered.access, hermesAccess);
+    assert.equal(recovered.refresh, "hermes-refresh");
+    assert.equal(recovered.codexAuth.idToken, "keep-this-id-token");
+    assert.equal(recovered.codexAuth.lastRefresh, "2026-05-05T03:15:42.976Z");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("runTokenKeepalive does not recover refresh_token_reused from a different Hermes identity", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-keepalive-hermes-mismatch-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const hermesAuthPath = path.join(activeTestHermesHome, "auth.json");
+  const profileId = "openai-codex:seat";
+  const oldAccess = createOpenAIAccessToken({
+    exp: Math.floor(Date.now() / 1000) - 60,
+    accountId: "account-seat",
+    userId: "user-seat",
+    email: "seat@example.com",
+  });
+  const wrongAccess = createOpenAIAccessToken({
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    accountId: "account-other",
+    userId: "user-other",
+    email: "other@example.com",
+  });
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      [profileId]: createOauthProfile({
+        access: oldAccess,
+        refresh: "old-refresh",
+        accountId: "account-seat",
+        email: "seat@example.com",
+        expires: Date.now() - 60_000,
+      }),
+    },
+    order: {
+      "openai-codex": [profileId],
+    },
+  });
+  writeHermesManagedProfile(hermesAuthPath, profileId, createOauthProfile({
+    access: wrongAccess,
+    refresh: "wrong-refresh",
+    accountId: "account-other",
+    email: "other@example.com",
+    expires: Date.now() + 60 * 60 * 1_000,
+  }));
+
+  try {
+    const result = await runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        refreshImpl: async () => {
+          throw new Error(
+            "Failed to refresh OpenAI Codex token: HTTP 401 Unauthorized refresh_token_reused: already used",
+          );
+        },
+      },
+    );
+
+    assert.equal(result.failedCount, 1);
+    assert.equal(result.recoveredFromHermesCount, 0);
+    assert.equal(result.hermesRecoveryFailedProfiles.length, 1);
+    assert.match(result.hermesRecoveryFailedProfiles[0].error, /does not match profile/);
+    const localStore = readAuthStore(path.join(localStateDir, "auth-store.json"));
+    assert.equal(localStore.profiles[profileId].access, oldAccess);
+    assert.equal(localStore.profiles[profileId].refresh, "old-refresh");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("runTokenKeepalive does not recover refresh_token_reused from an older Hermes credential", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-dashboard-keepalive-hermes-older-"));
+  const localStateDir = path.join(stateDir, ".local");
+  const codexAuthPath = path.join(stateDir, ".codex", "auth.json");
+  const hermesAuthPath = path.join(activeTestHermesHome, "auth.json");
+  const profileId = "openai-codex:seat";
+  const accountId = "account-seat";
+  const userId = "user-seat";
+  const email = "seat@example.com";
+  const localAccess = createOpenAIAccessToken({
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    accountId,
+    userId,
+    email,
+  });
+  const olderHermesAccess = createOpenAIAccessToken({
+    exp: Math.floor(Date.now() / 1000) + 1800,
+    accountId,
+    userId,
+    email,
+  });
+
+  writeLocalStore(stateDir, {
+    profiles: {
+      [profileId]: createOauthProfile({
+        access: localAccess,
+        refresh: "local-refresh",
+        accountId,
+        email,
+        expires: Date.now() + 60 * 60 * 1_000,
+      }),
+    },
+    order: {
+      "openai-codex": [profileId],
+    },
+  });
+  writeHermesManagedProfile(hermesAuthPath, profileId, createOauthProfile({
+    access: olderHermesAccess,
+    refresh: "older-refresh",
+    accountId,
+    email,
+    expires: Date.now() - 30_000,
+  }));
+
+  try {
+    const result = await runTokenKeepalive(
+      { stateDir, localStateDir, agent: "main", codexAuthPath },
+      {
+        refreshImpl: async () => {
+          throw new Error(
+            "Failed to refresh OpenAI Codex token: HTTP 401 Unauthorized refresh_token_reused: already used",
+          );
+        },
+      },
+    );
+
+    assert.equal(result.failedCount, 1);
+    assert.equal(result.recoveredFromHermesCount, 0);
+    assert.match(result.hermesRecoveryFailedProfiles[0].error, /not newer/);
+    const localStore = readAuthStore(path.join(localStateDir, "auth-store.json"));
+    assert.equal(localStore.profiles[profileId].access, localAccess);
+    assert.equal(localStore.profiles[profileId].refresh, "local-refresh");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
   }
 });
 
