@@ -8,12 +8,15 @@
 import { buildLocalAuthStore } from "./auth-store.js";
 import {
   acquireRefreshLease,
+  compareAndSwapProfileInD1,
   deleteProfilesFromD1,
+  getProfileFromD1,
   healthCheck as cloudHealthCheck,
   pullStoreFromD1,
   pushMetaToD1,
   pushProfileToD1,
   pushStoreToD1,
+  recordProfileRefreshErrorInD1,
   releaseRefreshLease,
 } from "./cloud-sync.js";
 import { createD1Client } from "./d1-client.js";
@@ -101,6 +104,56 @@ export async function pushProfileCloudUpdate(options, profileId, credential) {
     return { skipped: false };
   } catch (error) {
     return { skipped: false, error: toErrorMessage(error) };
+  }
+}
+
+export async function getCloudProfile(options, profileId) {
+  const { config, client } = await loadCloudContext(options);
+  if (!client) {
+    return { skipped: true, profile: null };
+  }
+  requireCloudReady(config);
+  const profile = await getProfileFromD1({
+    client,
+    passphrase: config.passphrase,
+    profileId,
+  });
+  return { skipped: false, profile };
+}
+
+export async function compareAndSwapCloudProfile(options, profileId, credential, expected = {}) {
+  const { config, client } = await loadCloudContext(options);
+  if (!client) {
+    return { skipped: true, profile: null };
+  }
+  requireCloudReady(config);
+  const profile = await compareAndSwapProfileInD1({
+    client,
+    passphrase: config.passphrase,
+    deviceId: config.deviceId,
+    profileId,
+    credential,
+    expectedRefreshTokenHash: expected.refreshTokenHash,
+    expectedTokenGeneration: expected.tokenGeneration,
+  });
+  return { skipped: false, profile };
+}
+
+export async function recordCloudRefreshError(options, profileId, error) {
+  const { config, client } = await loadCloudContext(options);
+  if (!client) {
+    return { skipped: true };
+  }
+  try {
+    await recordProfileRefreshErrorInD1({
+      client,
+      profileId,
+      deviceId: config.deviceId,
+      error,
+    });
+    return { skipped: false };
+  } catch (recordError) {
+    return { skipped: false, error: toErrorMessage(recordError) };
   }
 }
 

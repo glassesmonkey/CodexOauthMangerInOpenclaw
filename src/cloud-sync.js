@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * High-level cloud sync primitives built on top of the D1 REST client.
  *
@@ -31,6 +33,46 @@ function nowMs() {
   return Date.now();
 }
 
+export function hashRefreshToken(refreshToken) {
+  if (typeof refreshToken !== "string" || !refreshToken.trim()) {
+    return null;
+  }
+  return createHash("sha256").update(refreshToken.trim()).digest("hex");
+}
+
+export function readTokenGeneration(credential) {
+  const generation = credential?.codexAuth?.tokenGeneration;
+  return Number.isInteger(generation) && generation > 0 ? generation : 0;
+}
+
+export function withRemoteTokenGeneration(credential, generation) {
+  if (!isRecord(credential)) {
+    return credential;
+  }
+  const normalizedGeneration = Number.isInteger(generation) && generation > 0 ? generation : 0;
+  if (normalizedGeneration <= 0) {
+    return credential;
+  }
+  return {
+    ...credential,
+    codexAuth: {
+      ...(isRecord(credential.codexAuth) ? credential.codexAuth : {}),
+      tokenGeneration: normalizedGeneration,
+    },
+  };
+}
+
+function normalizeRefreshTimestamp(credential, fallbackMs = null) {
+  const lastRefresh = credential?.codexAuth?.lastRefresh;
+  if (typeof lastRefresh === "string" && lastRefresh.trim()) {
+    const parsed = Date.parse(lastRefresh);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return Number.isFinite(fallbackMs) ? fallbackMs : null;
+}
+
 function pickDiagnosticFields(credential) {
   const accessClaim = decodeJwt(credential?.access)?.["https://api.openai.com/auth"];
   const chatgptUserId = accessClaim && typeof accessClaim.chatgpt_user_id === "string"
@@ -53,6 +95,64 @@ function pickDiagnosticFields(credential) {
   };
 }
 
+function prepareProfileRemoteRow({ profileId, credential, passphrase, deviceId, ts, generation = null }) {
+  const tokenGeneration = Number.isInteger(generation) && generation > 0
+    ? generation
+    : Math.max(1, readTokenGeneration(credential));
+  const credentialWithGeneration = withRemoteTokenGeneration(credential, tokenGeneration);
+  const diag = pickDiagnosticFields(credentialWithGeneration);
+  const serialized = serializeCredentialForRemote(credentialWithGeneration, passphrase);
+  return {
+    profileId,
+    credential: credentialWithGeneration,
+    diag,
+    serialized,
+    tokenGeneration,
+    refreshTokenHash: hashRefreshToken(credentialWithGeneration?.refresh),
+    lastRefreshAt: normalizeRefreshTimestamp(credentialWithGeneration, ts),
+    lastRefreshBy: deviceId,
+  };
+}
+
+function decryptProfileRow(row, passphrase) {
+  const credential = deserializeCredentialFromRemote({
+    blob: row.credential_blob,
+    iv: row.credential_blob_iv,
+    salt: row.credential_blob_salt,
+    isEncrypted: Boolean(row.is_encrypted),
+  }, passphrase);
+  return withRemoteTokenGeneration(credential, row.token_generation);
+}
+
+function normalizeProfileRow(row, passphrase) {
+  const credential = decryptProfileRow(row, passphrase);
+  return {
+    profileId: row.profile_id,
+    credential,
+    tokenGeneration: Number.isInteger(row.token_generation) ? row.token_generation : readTokenGeneration(credential),
+    refreshTokenHash: typeof row.refresh_token_hash === "string" ? row.refresh_token_hash : hashRefreshToken(credential?.refresh),
+    updatedAt: row.updated_at ?? null,
+    updatedBy: row.updated_by ?? null,
+    lastRefreshAt: row.last_refresh_at ?? null,
+    lastRefreshBy: row.last_refresh_by ?? null,
+    lastRefreshError: row.last_refresh_error ?? null,
+    lastRefreshErrorAt: row.last_refresh_error_at ?? null,
+  };
+}
+
+async function selectProfileRow(client, profileId) {
+  const result = await client.query(
+    `SELECT profile_id, provider, email, chatgpt_user_id, account_id, expires_at,
+            credential_blob, credential_blob_iv, credential_blob_salt, is_encrypted,
+            version, updated_at, updated_by, token_generation, refresh_token_hash,
+            last_refresh_at, last_refresh_by, last_refresh_error, last_refresh_error_at
+       FROM profiles
+      WHERE profile_id = ?;`,
+    [profileId],
+  );
+  return result?.results?.[0] ?? null;
+}
+
 function decodeJwt(token) {
   if (typeof token !== "string" || !token.includes(".")) {
     return null;
@@ -72,19 +172,14 @@ export async function pullStoreFromD1({ client, passphrase }) {
   const profilesResult = await client.query(
     `SELECT profile_id, provider, email, chatgpt_user_id, account_id, expires_at,
             credential_blob, credential_blob_iv, credential_blob_salt, is_encrypted,
-            version, updated_at, updated_by
+            version, updated_at, updated_by, token_generation, refresh_token_hash,
+            last_refresh_at, last_refresh_by, last_refresh_error, last_refresh_error_at
        FROM profiles;`,
   );
   const profiles = {};
   for (const row of profilesResult?.results ?? []) {
     try {
-      const credential = deserializeCredentialFromRemote({
-        blob: row.credential_blob,
-        iv: row.credential_blob_iv,
-        salt: row.credential_blob_salt,
-        isEncrypted: Boolean(row.is_encrypted),
-      }, passphrase);
-      profiles[row.profile_id] = credential;
+      profiles[row.profile_id] = decryptProfileRow(row, passphrase);
     } catch (error) {
       if (error instanceof StoreCryptoError) {
         throw new Error(
@@ -124,14 +219,15 @@ export async function pushStoreToD1({ client, passphrase, deviceId, store, repla
 
   const ts = nowMs();
   for (const [profileId, credential] of Object.entries(store.profiles || {})) {
-    const diag = pickDiagnosticFields(credential);
-    const serialized = serializeCredentialForRemote(credential, passphrase);
+    const row = prepareProfileRemoteRow({ profileId, credential, passphrase, deviceId, ts });
     statements.push({
       sql: `INSERT INTO profiles (
               profile_id, provider, email, chatgpt_user_id, account_id,
               expires_at, credential_blob, credential_blob_iv, credential_blob_salt,
-              is_encrypted, version, updated_at, updated_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+              is_encrypted, version, updated_at, updated_by, token_generation,
+              refresh_token_hash, last_refresh_at, last_refresh_by,
+              last_refresh_error, last_refresh_error_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)
             ON CONFLICT(profile_id) DO UPDATE SET
               provider = excluded.provider,
               email = excluded.email,
@@ -144,20 +240,32 @@ export async function pushStoreToD1({ client, passphrase, deviceId, store, repla
               is_encrypted = excluded.is_encrypted,
               version = profiles.version + 1,
               updated_at = excluded.updated_at,
-              updated_by = excluded.updated_by;`,
+              updated_by = excluded.updated_by,
+              token_generation = excluded.token_generation,
+              refresh_token_hash = excluded.refresh_token_hash,
+              last_refresh_at = excluded.last_refresh_at,
+              last_refresh_by = excluded.last_refresh_by,
+              last_refresh_error = NULL,
+              last_refresh_error_at = NULL
+            WHERE COALESCE(excluded.token_generation, 0) >= COALESCE(profiles.token_generation, 0)
+               OR COALESCE(excluded.refresh_token_hash, '') = COALESCE(profiles.refresh_token_hash, '');`,
       params: [
         profileId,
-        diag.provider,
-        diag.email,
-        diag.chatgptUserId,
-        diag.accountId,
-        diag.expiresAt,
-        serialized.blob,
-        serialized.iv,
-        serialized.salt,
-        serialized.isEncrypted ? 1 : 0,
+        row.diag.provider,
+        row.diag.email,
+        row.diag.chatgptUserId,
+        row.diag.accountId,
+        row.diag.expiresAt,
+        row.serialized.blob,
+        row.serialized.iv,
+        row.serialized.salt,
+        row.serialized.isEncrypted ? 1 : 0,
         ts,
         deviceId,
+        row.tokenGeneration,
+        row.refreshTokenHash,
+        row.lastRefreshAt,
+        row.lastRefreshBy,
       ],
     });
   }
@@ -194,15 +302,16 @@ export async function pushStoreToD1({ client, passphrase, deviceId, store, repla
 }
 
 export async function pushProfileToD1({ client, passphrase, deviceId, profileId, credential }) {
-  const diag = pickDiagnosticFields(credential);
-  const serialized = serializeCredentialForRemote(credential, passphrase);
   const ts = nowMs();
+  const row = prepareProfileRemoteRow({ profileId, credential, passphrase, deviceId, ts });
   await client.query(
     `INSERT INTO profiles (
         profile_id, provider, email, chatgpt_user_id, account_id,
         expires_at, credential_blob, credential_blob_iv, credential_blob_salt,
-        is_encrypted, version, updated_at, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        is_encrypted, version, updated_at, updated_by, token_generation,
+        refresh_token_hash, last_refresh_at, last_refresh_by,
+        last_refresh_error, last_refresh_error_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)
       ON CONFLICT(profile_id) DO UPDATE SET
         provider = excluded.provider,
         email = excluded.email,
@@ -215,21 +324,148 @@ export async function pushProfileToD1({ client, passphrase, deviceId, profileId,
         is_encrypted = excluded.is_encrypted,
         version = profiles.version + 1,
         updated_at = excluded.updated_at,
-        updated_by = excluded.updated_by;`,
+        updated_by = excluded.updated_by,
+        token_generation = excluded.token_generation,
+        refresh_token_hash = excluded.refresh_token_hash,
+        last_refresh_at = excluded.last_refresh_at,
+        last_refresh_by = excluded.last_refresh_by,
+        last_refresh_error = NULL,
+        last_refresh_error_at = NULL
+      WHERE COALESCE(excluded.token_generation, 0) >= COALESCE(profiles.token_generation, 0)
+         OR COALESCE(excluded.refresh_token_hash, '') = COALESCE(profiles.refresh_token_hash, '');`,
     [
       profileId,
-      diag.provider,
-      diag.email,
-      diag.chatgptUserId,
-      diag.accountId,
-      diag.expiresAt,
-      serialized.blob,
-      serialized.iv,
-      serialized.salt,
-      serialized.isEncrypted ? 1 : 0,
+      row.diag.provider,
+      row.diag.email,
+      row.diag.chatgptUserId,
+      row.diag.accountId,
+      row.diag.expiresAt,
+      row.serialized.blob,
+      row.serialized.iv,
+      row.serialized.salt,
+      row.serialized.isEncrypted ? 1 : 0,
       ts,
       deviceId,
+      row.tokenGeneration,
+      row.refreshTokenHash,
+      row.lastRefreshAt,
+      row.lastRefreshBy,
     ],
+  );
+}
+
+export async function getProfileFromD1({ client, passphrase, profileId }) {
+  const row = await selectProfileRow(client, profileId);
+  if (!row) {
+    return null;
+  }
+  try {
+    return normalizeProfileRow(row, passphrase);
+  } catch (error) {
+    if (error instanceof StoreCryptoError) {
+      throw new Error(`Unable to decrypt profile "${profileId}" from D1: ${error.message}`);
+    }
+    throw error;
+  }
+}
+
+export async function compareAndSwapProfileInD1({
+  client,
+  passphrase,
+  deviceId,
+  profileId,
+  credential,
+  expectedRefreshTokenHash = null,
+  expectedTokenGeneration = 0,
+}) {
+  const current = await getProfileFromD1({ client, passphrase, profileId });
+  if (!current) {
+    await pushProfileToD1({ client, passphrase, deviceId, profileId, credential });
+    return await getProfileFromD1({ client, passphrase, profileId });
+  }
+
+  const nextGeneration = Math.max(
+    current.tokenGeneration || 0,
+    Number.isInteger(expectedTokenGeneration) ? expectedTokenGeneration : 0,
+    readTokenGeneration(credential),
+  ) + 1;
+  const ts = nowMs();
+  const row = prepareProfileRemoteRow({
+    profileId,
+    credential,
+    passphrase,
+    deviceId,
+    ts,
+    generation: nextGeneration,
+  });
+  const expectedHash = typeof expectedRefreshTokenHash === "string"
+    ? expectedRefreshTokenHash
+    : null;
+
+  const result = await client.query(
+    `UPDATE profiles
+        SET provider = ?,
+            email = ?,
+            chatgpt_user_id = ?,
+            account_id = ?,
+            expires_at = ?,
+            credential_blob = ?,
+            credential_blob_iv = ?,
+            credential_blob_salt = ?,
+            is_encrypted = ?,
+            version = version + 1,
+            updated_at = ?,
+            updated_by = ?,
+            token_generation = ?,
+            refresh_token_hash = ?,
+            last_refresh_at = ?,
+            last_refresh_by = ?,
+            last_refresh_error = NULL,
+            last_refresh_error_at = NULL
+      WHERE profile_id = ?
+        AND COALESCE(refresh_token_hash, '') = COALESCE(?, '')
+        AND COALESCE(token_generation, 0) <= ?;`,
+    [
+      row.diag.provider,
+      row.diag.email,
+      row.diag.chatgptUserId,
+      row.diag.accountId,
+      row.diag.expiresAt,
+      row.serialized.blob,
+      row.serialized.iv,
+      row.serialized.salt,
+      row.serialized.isEncrypted ? 1 : 0,
+      ts,
+      deviceId,
+      row.tokenGeneration,
+      row.refreshTokenHash,
+      row.lastRefreshAt,
+      row.lastRefreshBy,
+      profileId,
+      expectedHash,
+      Number.isInteger(expectedTokenGeneration) ? expectedTokenGeneration : 0,
+    ],
+  );
+
+  if ((result?.meta?.changes ?? 0) > 0) {
+    const updated = await getProfileFromD1({ client, passphrase, profileId });
+    return { ...updated, updated: true, stale: false };
+  }
+
+  const latest = await getProfileFromD1({ client, passphrase, profileId });
+  return { ...latest, updated: false, stale: true };
+}
+
+export async function recordProfileRefreshErrorInD1({ client, profileId, deviceId, error }) {
+  const ts = nowMs();
+  const message = error instanceof Error ? error.message : String(error ?? "Unknown refresh error");
+  await client.query(
+    `UPDATE profiles
+        SET last_refresh_error = ?,
+            last_refresh_error_at = ?,
+            updated_by = ?
+      WHERE profile_id = ?;`,
+    [message.slice(0, 1000), ts, deviceId, profileId],
   );
 }
 

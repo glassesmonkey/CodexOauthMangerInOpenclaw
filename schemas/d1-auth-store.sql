@@ -26,12 +26,19 @@ CREATE TABLE IF NOT EXISTS profiles (
   is_encrypted      INTEGER NOT NULL DEFAULT 0,
   version           INTEGER NOT NULL DEFAULT 1,
   updated_at        INTEGER NOT NULL,
-  updated_by        TEXT                    -- device id that last wrote
+  updated_by        TEXT,                   -- device id that last wrote
+  token_generation  INTEGER NOT NULL DEFAULT 0,
+  refresh_token_hash TEXT,
+  last_refresh_at   INTEGER,
+  last_refresh_by   TEXT,
+  last_refresh_error TEXT,
+  last_refresh_error_at INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS profiles_by_email ON profiles(email);
 CREATE INDEX IF NOT EXISTS profiles_by_chatgpt_user_id ON profiles(chatgpt_user_id);
 CREATE INDEX IF NOT EXISTS profiles_by_expires_at ON profiles(expires_at);
+CREATE INDEX IF NOT EXISTS profiles_by_refresh_token_hash ON profiles(refresh_token_hash);
 
 CREATE TABLE IF NOT EXISTS store_meta (
   meta_key          TEXT PRIMARY KEY,       -- 'order' | 'lastGood' | 'usageStats' | 'maintenance'
@@ -59,4 +66,4 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 INSERT OR REPLACE INTO schema_version (id, version, updated_at)
-VALUES (1, 1, CAST(strftime('%s','now') AS INTEGER) * 1000);
+VALUES (1, 2, CAST(strftime('%s','now') AS INTEGER) * 1000);
