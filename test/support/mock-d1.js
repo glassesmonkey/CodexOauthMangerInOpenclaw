@@ -12,7 +12,7 @@ export class MockD1 {
     this.profiles = new Map();
     this.storeMeta = new Map();
     this.refreshLeases = new Map();
-    this.schemaVersion = 1;
+    this.schemaVersion = 2;
     this.callCount = 0;
     this.now = () => Date.now();
   }
@@ -75,6 +75,13 @@ export class MockD1 {
     if (upper.startsWith("SELECT VERSION FROM SCHEMA_VERSION")) {
       return { results: [{ version: this.schemaVersion }], meta: { changes: 0, rows_read: 1 } };
     }
+    if (upper.startsWith("SELECT PROFILE_ID") && upper.includes("WHERE PROFILE_ID = ?")) {
+      const row = this.profiles.get(params[0]);
+      return {
+        results: row ? [{ profile_id: params[0], ...row }] : [],
+        meta: { changes: 0, rows_read: row ? 1 : 0 },
+      };
+    }
     if (upper.startsWith("SELECT PROFILE_ID")) {
       return {
         results: Array.from(this.profiles.entries()).map(([id, row]) => ({
@@ -118,10 +125,11 @@ export class MockD1 {
       const [
         profileId, provider, email, chatgptUserId, accountId,
         expiresAt, credentialBlob, credentialBlobIv, credentialBlobSalt,
-        isEncrypted, updatedAt, updatedBy,
+        isEncrypted, updatedAt, updatedBy, tokenGeneration, refreshTokenHash,
+        lastRefreshAt, lastRefreshBy,
       ] = params;
       const existing = this.profiles.get(profileId);
-      this.profiles.set(profileId, {
+      const incoming = {
         provider,
         email,
         chatgpt_user_id: chatgptUserId,
@@ -133,6 +141,69 @@ export class MockD1 {
         is_encrypted: isEncrypted,
         version: existing ? (existing.version + 1) : 1,
         updated_at: updatedAt,
+        updated_by: updatedBy,
+        token_generation: tokenGeneration ?? existing?.token_generation ?? 0,
+        refresh_token_hash: refreshTokenHash ?? existing?.refresh_token_hash ?? null,
+        last_refresh_at: lastRefreshAt ?? existing?.last_refresh_at ?? null,
+        last_refresh_by: lastRefreshBy ?? existing?.last_refresh_by ?? null,
+        last_refresh_error: null,
+        last_refresh_error_at: null,
+      };
+      const canUpdate = !existing
+        || (Number(incoming.token_generation) || 0) >= (Number(existing.token_generation) || 0)
+        || String(incoming.refresh_token_hash || "") === String(existing.refresh_token_hash || "");
+      if (canUpdate) {
+        this.profiles.set(profileId, incoming);
+      }
+      return { results: [], meta: { changes: 1 } };
+    }
+    if (upper.startsWith("UPDATE PROFILES") && upper.includes("REFRESH_TOKEN_HASH")) {
+      const [
+        provider, email, chatgptUserId, accountId, expiresAt,
+        credentialBlob, credentialBlobIv, credentialBlobSalt, isEncrypted,
+        updatedAt, updatedBy, tokenGeneration, refreshTokenHash,
+        lastRefreshAt, lastRefreshBy, profileId, expectedRefreshTokenHash,
+        expectedTokenGeneration,
+      ] = params;
+      const existing = this.profiles.get(profileId);
+      const expectedHashMatches = String(existing?.refresh_token_hash || "") === String(expectedRefreshTokenHash || "");
+      const expectedGenerationAllows = (Number(existing?.token_generation) || 0) <= (Number(expectedTokenGeneration) || 0);
+      if (!existing || !expectedHashMatches || !expectedGenerationAllows) {
+        return { results: [], meta: { changes: 0 } };
+      }
+      this.profiles.set(profileId, {
+        ...existing,
+        provider,
+        email,
+        chatgpt_user_id: chatgptUserId,
+        account_id: accountId,
+        expires_at: expiresAt,
+        credential_blob: credentialBlob,
+        credential_blob_iv: credentialBlobIv,
+        credential_blob_salt: credentialBlobSalt,
+        is_encrypted: isEncrypted,
+        version: (existing.version || 1) + 1,
+        updated_at: updatedAt,
+        updated_by: updatedBy,
+        token_generation: tokenGeneration,
+        refresh_token_hash: refreshTokenHash,
+        last_refresh_at: lastRefreshAt,
+        last_refresh_by: lastRefreshBy,
+        last_refresh_error: null,
+        last_refresh_error_at: null,
+      });
+      return { results: [], meta: { changes: 1 } };
+    }
+    if (upper.startsWith("UPDATE PROFILES") && upper.includes("LAST_REFRESH_ERROR")) {
+      const [lastRefreshError, lastRefreshErrorAt, updatedBy, profileId] = params;
+      const existing = this.profiles.get(profileId);
+      if (!existing) {
+        return { results: [], meta: { changes: 0 } };
+      }
+      this.profiles.set(profileId, {
+        ...existing,
+        last_refresh_error: lastRefreshError,
+        last_refresh_error_at: lastRefreshErrorAt,
         updated_by: updatedBy,
       });
       return { results: [], meta: { changes: 1 } };

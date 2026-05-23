@@ -42,11 +42,15 @@ export function normalizeCodexAuthMetadata(value) {
     return undefined;
   }
 
-  return {
+  const metadata = {
     authMode,
     idToken,
     lastRefresh: lastRefresh || new Date().toISOString(),
   };
+  if (Number.isInteger(value.tokenGeneration) && value.tokenGeneration > 0) {
+    metadata.tokenGeneration = value.tokenGeneration;
+  }
+  return metadata;
 }
 
 export function readCodexAuthFile(filePath) {

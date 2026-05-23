@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { writeAuthStore } from "../src/auth-store.js";
+import { readAuthStore, writeAuthStore } from "../src/auth-store.js";
 import {
   acquireRefreshLease,
+  compareAndSwapProfileInD1,
+  getProfileFromD1,
   pullStoreFromD1,
+  pushProfileToD1,
   pushStoreToD1,
   releaseRefreshLease,
 } from "../src/cloud-sync.js";
@@ -226,6 +229,68 @@ test("cloud-sync: acquireRefreshLease blocks a second holder until release", asy
   assert.equal(third.acquired, true);
 });
 
+test("cloud-sync: profile CAS rejects stale refresh writers and returns latest credential", async () => {
+  const mock = new MockD1();
+  const client = createD1Client({
+    accountId: "acc",
+    databaseId: "db",
+    apiToken: "tok",
+    fetchImpl: mock.fetchImpl.bind(mock),
+  });
+  const profileId = "openai-codex:alpha";
+  const oldCredential = buildOauthProfile({
+    access: "old-access",
+    refresh: "old-refresh",
+    expires: Date.now() - 60_000,
+    email: "alpha@example.com",
+  });
+  await pushProfileToD1({
+    client,
+    passphrase: "",
+    deviceId: "device-a",
+    profileId,
+    credential: oldCredential,
+  });
+  const baseline = await getProfileFromD1({ client, passphrase: "", profileId });
+
+  const freshCredential = buildOauthProfile({
+    access: "fresh-access",
+    refresh: "fresh-refresh",
+    expires: Date.now() + 60_000,
+    email: "alpha@example.com",
+  });
+  const first = await compareAndSwapProfileInD1({
+    client,
+    passphrase: "",
+    deviceId: "device-b",
+    profileId,
+    credential: freshCredential,
+    expectedRefreshTokenHash: baseline.refreshTokenHash,
+    expectedTokenGeneration: baseline.tokenGeneration,
+  });
+  assert.equal(first.updated, true);
+  assert.equal(first.credential.refresh, "fresh-refresh");
+
+  const staleCredential = buildOauthProfile({
+    access: "stale-access",
+    refresh: "stale-refresh",
+    expires: Date.now() + 120_000,
+    email: "alpha@example.com",
+  });
+  const stale = await compareAndSwapProfileInD1({
+    client,
+    passphrase: "",
+    deviceId: "device-c",
+    profileId,
+    credential: staleCredential,
+    expectedRefreshTokenHash: baseline.refreshTokenHash,
+    expectedTokenGeneration: baseline.tokenGeneration,
+  });
+  assert.equal(stale.updated, false);
+  assert.equal(stale.stale, true);
+  assert.equal(stale.credential.refresh, "fresh-refresh");
+});
+
 test("dashboard-config: storeMode defaults to offline and can be toggled", () => {
   const { localStateDir, stateDir } = setupStateDir("codex-dashboard-config-");
   try {
@@ -407,6 +472,62 @@ test("runTokenKeepalive pushes Hermes recovery to D1 in cloud mode", async () =>
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });
     fs.rmSync(hermesHome, { recursive: true, force: true });
+  }
+});
+
+test("runTokenKeepalive reuses newer D1 credential instead of refreshing a stale local token", async () => {
+  const { stateDir, localStateDir, codexAuthPath } = setupStateDir("codex-dashboard-keepalive-cloud-stale-");
+  const profileId = "openai-codex:seat";
+  try {
+    const now = Date.now();
+    writeInitialStore(stateDir, {
+      [profileId]: buildOauthProfile({
+        access: "old-access",
+        refresh: "old-refresh",
+        expires: now - 60_000,
+        email: "seat@example.com",
+      }),
+    }, [profileId]);
+
+    const mock = new MockD1();
+    const client = createD1Client({
+      accountId: "acc",
+      databaseId: "db",
+      apiToken: "tok",
+      fetchImpl: mock.fetchImpl.bind(mock),
+    });
+    await pushProfileToD1({
+      client,
+      passphrase: "",
+      deviceId: "other-project",
+      profileId,
+      credential: buildOauthProfile({
+        access: "remote-access",
+        refresh: "remote-refresh",
+        expires: now + 60 * 60 * 1000,
+        email: "seat@example.com",
+      }),
+    });
+
+    let result;
+    await runWithCloudMock(mock, localStateDir, async () => {
+      result = await runTokenKeepalive(
+        { stateDir, localStateDir, agent: "main", codexAuthPath },
+        {
+          refreshImpl: async () => {
+            throw new Error("refreshImpl should not be called when D1 already has a fresher token");
+          },
+        },
+      );
+    });
+
+    assert.equal(result.failedCount, 0);
+    assert.equal(result.refreshedCount, 0);
+    assert.equal(result.skippedTooEarlyCount, 1);
+    const localStore = readAuthStore(path.join(stateDir, ".local", "auth-store.json"));
+    assert.equal(localStore.profiles[profileId].refresh, "remote-refresh");
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
   }
 });
 

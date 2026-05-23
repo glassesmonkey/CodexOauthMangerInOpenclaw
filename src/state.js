@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -82,12 +82,15 @@ import { dedupeStrings, isRecord, toErrorMessage } from "./utils.js";
 import {
   bootstrapCloudFromLocal,
   checkCloudHealth,
+  compareAndSwapCloudProfile,
   deleteCloudProfiles,
+  getCloudProfile,
   isCloudMode,
   loadCloudContext,
   pullCloudStore,
   pushProfileCloudUpdate,
   pushMetaCloudUpdate,
+  recordCloudRefreshError,
   syncLocalStoreToCloud,
   withRefreshLease,
 } from "./cloud-gate.js";
@@ -117,6 +120,42 @@ function resolveExpiresAt(credential) {
   return typeof credential?.expires === "number" && Number.isFinite(credential.expires)
     ? credential.expires
     : null;
+}
+
+function readCredentialTokenGeneration(credential) {
+  const generation = credential?.codexAuth?.tokenGeneration;
+  return Number.isInteger(generation) && generation > 0 ? generation : 0;
+}
+
+function hashCredentialRefreshToken(credential) {
+  if (typeof credential?.refresh !== "string" || !credential.refresh.trim()) {
+    return null;
+  }
+  return createHash("sha256").update(credential.refresh.trim()).digest("hex");
+}
+
+function compareCredentialFreshness(left, right) {
+  const leftGeneration = readCredentialTokenGeneration(left);
+  const rightGeneration = readCredentialTokenGeneration(right);
+  if (leftGeneration !== rightGeneration) {
+    return leftGeneration - rightGeneration;
+  }
+
+  const leftExpires = resolveExpiresAt(left) ?? 0;
+  const rightExpires = resolveExpiresAt(right) ?? 0;
+  if (leftExpires !== rightExpires) {
+    return leftExpires - rightExpires;
+  }
+
+  const leftLastRefresh = Date.parse(left?.codexAuth?.lastRefresh ?? "");
+  const rightLastRefresh = Date.parse(right?.codexAuth?.lastRefresh ?? "");
+  const leftRefreshMs = Number.isFinite(leftLastRefresh) ? leftLastRefresh : 0;
+  const rightRefreshMs = Number.isFinite(rightLastRefresh) ? rightLastRefresh : 0;
+  return leftRefreshMs - rightRefreshMs;
+}
+
+function isCredentialNewerThan(candidate, baseline) {
+  return compareCredentialFreshness(candidate, baseline) > 0;
 }
 
 function normalizeEmail(email) {
@@ -1588,9 +1627,15 @@ function mergeCodexSidecarIntoStore(store, codexAuth) {
     return buildLocalAuthStore(store);
   }
 
-  const matches = listCodexProfiles(store)
-    .filter((entry) => codexAuthExactlyMatchesCredential(codexAuth, entry.credential))
-    .map((entry) => entry.profileId);
+  const exactMatches = listCodexProfiles(store)
+    .filter((entry) => codexAuthExactlyMatchesCredential(codexAuth, entry.credential));
+  const incomingAccountId = typeof codexAuth.tokens?.accountId === "string" && codexAuth.tokens.accountId.trim()
+    ? codexAuth.tokens.accountId.trim()
+    : null;
+  const identityMatches = exactMatches.length === 0 && incomingAccountId
+    ? listCodexProfiles(store).filter((entry) => resolveAccountId(entry.credential) === incomingAccountId)
+    : [];
+  const matches = (exactMatches.length > 0 ? exactMatches : identityMatches).map((entry) => entry.profileId);
   if (matches.length !== 1) {
     return buildLocalAuthStore(store);
   }
@@ -1861,10 +1906,13 @@ export async function applyOrder(options, order, deps = {}) {
           applyResult.codexSelectionSkippedReason = "Codex 当前账号已经是推荐第一名。";
         } else {
           try {
-            const resolved = await resolveCredentialToken(preferredCredential, {
-              proxyConfig: deps.proxyConfig,
-              ...(deps.refreshImpl ? { refreshImpl: deps.refreshImpl } : {}),
-            });
+            const resolved = await resolveProfileTokenWithCloud(
+              options,
+              preferredProfileId,
+              preferredCredential,
+              deps,
+              { forceRefresh: false },
+            );
             if (resolved.updated) {
               finalStore = await updateAuthStore(options, (nextStore) => {
                 const next = structuredClone(nextStore);
@@ -1965,6 +2013,107 @@ function tryRecoverRefreshTokenReuseFromHermes(context, profileId, credential) {
   }
 }
 
+function isRefreshConflictError(error) {
+  return /refresh_token_reused|invalid_grant|HTTP 401|Unauthorized/i.test(toErrorMessage(error));
+}
+
+async function resolveProfileTokenWithCloud(options, profileId, credential, deps = {}, { forceRefresh = false } = {}) {
+  const cloudContext = await loadCloudContext(options);
+  if (!cloudContext.client) {
+    return await resolveCredentialToken(credential, {
+      proxyConfig: deps.proxyConfig,
+      forceRefresh,
+      ...(deps.refreshImpl ? { refreshImpl: deps.refreshImpl } : {}),
+    });
+  }
+
+  const refreshInsideLease = async () => {
+    const remoteResult = await getCloudProfile(options, profileId);
+    const remoteProfile = remoteResult.profile;
+    const remoteCredential = remoteProfile?.credential || null;
+    const sourceCredential = remoteCredential && isCredentialNewerThan(remoteCredential, credential)
+      ? remoteCredential
+      : credential;
+    const remoteIsNewer = Boolean(remoteCredential && isCredentialNewerThan(remoteCredential, credential));
+    const remoteExpiresAt = resolveExpiresAt(remoteCredential);
+    const remoteStillNeedsRefresh = !Number.isFinite(remoteExpiresAt)
+      || remoteExpiresAt <= Date.now() + TOKEN_REFRESH_EXPIRY_GRACE_MS;
+
+    if (remoteIsNewer && (!forceRefresh || !remoteStillNeedsRefresh)) {
+      return {
+        updated: true,
+        credential: remoteCredential,
+        cloudRecovered: true,
+        source: "cloud-newer",
+      };
+    }
+
+    try {
+      const resolved = await resolveCredentialToken(sourceCredential, {
+        proxyConfig: deps.proxyConfig,
+        forceRefresh,
+        ...(deps.refreshImpl ? { refreshImpl: deps.refreshImpl } : {}),
+      });
+      if (!resolved.updated) {
+        return resolved;
+      }
+
+      const cas = await compareAndSwapCloudProfile(
+        options,
+        profileId,
+        resolved.credential,
+        {
+          refreshTokenHash: remoteProfile?.refreshTokenHash ?? hashCredentialRefreshToken(sourceCredential),
+          tokenGeneration: remoteProfile?.tokenGeneration ?? readCredentialTokenGeneration(sourceCredential),
+        },
+      );
+      if (!cas.skipped && cas.profile?.stale && cas.profile.credential) {
+        return {
+          updated: true,
+          credential: cas.profile.credential,
+          cloudRecovered: true,
+          casRejected: true,
+        };
+      }
+      return {
+        ...resolved,
+        credential: cas.profile?.credential || resolved.credential,
+        cloudUpdated: !cas.skipped,
+      };
+    } catch (error) {
+      if (isRefreshConflictError(error)) {
+        const latest = await getCloudProfile(options, profileId);
+        if (latest.profile?.credential && isCredentialNewerThan(latest.profile.credential, sourceCredential)) {
+          return {
+            updated: true,
+            credential: latest.profile.credential,
+            cloudRecovered: true,
+            source: "cloud-after-refresh-error",
+          };
+        }
+      }
+      await recordCloudRefreshError(options, profileId, error);
+      throw error;
+    }
+  };
+
+  const leaseOutcome = await withRefreshLease(options, profileId, refreshInsideLease, { ttlMs: 30_000 });
+  if (leaseOutcome.ran) {
+    return leaseOutcome.result;
+  }
+
+  const latest = await getCloudProfile(options, profileId);
+  if (latest.profile?.credential && isCredentialNewerThan(latest.profile.credential, credential)) {
+    return {
+      updated: true,
+      credential: latest.profile.credential,
+      cloudRecovered: true,
+      leaseSkipped: true,
+    };
+  }
+  return { updated: false, skipped: true, skippedReason: leaseOutcome.skippedReason || "held-by-other-device" };
+}
+
 async function doRunTokenKeepalive(options, deps = {}) {
   const context = resolvePaths(options);
   ensureLocalStoreInitialized(context);
@@ -1990,13 +2139,45 @@ async function doRunTokenKeepalive(options, deps = {}) {
   const cloudContext = await loadCloudContext(options);
   const cloudEnabled = Boolean(cloudContext.client);
   let cloudPrePullError = null;
+  const adoptedExternalProfileIds = new Set();
   if (cloudEnabled) {
     try {
       const remote = await pullCloudStore(options);
-      await updateAuthStore(options, (localStore) => mergeRemoteIntoLocal(localStore, remote));
+      await updateAuthStore(options, (localStore) => {
+        const merged = mergeRemoteIntoLocal(localStore, remote);
+        for (const [profileId, credential] of Object.entries(merged.profiles || {})) {
+          if (isCredentialNewerThan(credential, localStore.profiles?.[profileId])) {
+            adoptedExternalProfileIds.add(profileId);
+          }
+        }
+        return merged;
+      });
     } catch (error) {
       cloudPrePullError = toErrorMessage(error);
     }
+  }
+
+  let absorbedExternalUpdateCount = 0;
+  try {
+    const beforeAbsorbStore = readLocalAuthStore(context);
+    const absorbedStore = await updateAuthStore(options, (localStore) => {
+      let merged = buildLocalAuthStore(localStore);
+      if (context.codexAuthExists) {
+        merged = mergeCodexSidecarIntoStore(merged, readCodexAuthFile(context.codexAuthPath));
+      }
+      return merged;
+    });
+    absorbedExternalUpdateCount = listCodexProfiles(absorbedStore)
+      .filter((entry) => {
+        const adopted = isCredentialNewerThan(entry.credential, beforeAbsorbStore.profiles?.[entry.profileId]);
+        if (adopted) {
+          adoptedExternalProfileIds.add(entry.profileId);
+        }
+        return adopted;
+      })
+      .length;
+  } catch {
+    absorbedExternalUpdateCount = 0;
   }
 
   const nextStore = buildLocalAuthStore(readLocalAuthStore(context));
@@ -2025,39 +2206,32 @@ async function doRunTokenKeepalive(options, deps = {}) {
       }
       continue;
     }
-
-    const performRefresh = async () => {
-      return deps.refreshImpl
-        ? await resolveCredentialToken(entry.credential, {
-          proxyConfig: deps.proxyConfig,
-          forceRefresh: true,
-          refreshImpl: deps.refreshImpl,
-        })
-        : await resolveCredentialToken(entry.credential, {
-          proxyConfig: deps.proxyConfig,
-          forceRefresh: true,
-        });
-    };
+    if (
+      adoptedExternalProfileIds.has(entry.profileId)
+      && eligibility.reason !== "urgent"
+      && eligibility.reason !== "missing-expiry"
+    ) {
+      skippedTooEarlyCount += 1;
+      continue;
+    }
 
     try {
-      const leaseOutcome = await withRefreshLease(options, entry.profileId, performRefresh, { ttlMs: 30_000 });
-      if (!leaseOutcome.ran) {
+      const resolved = await resolveProfileTokenWithCloud(
+        options,
+        entry.profileId,
+        entry.credential,
+        deps,
+        { forceRefresh: true },
+      );
+      if (resolved.skipped) {
         skippedLeaseCount += 1;
         leaseSkippedProfiles.push(entry.profileId);
         continue;
       }
-      const resolved = leaseOutcome.result;
       if (resolved.updated) {
         nextStore.profiles[entry.profileId] = mergeRefreshedCredential(nextStore.profiles[entry.profileId], resolved.credential);
         changedProfileIds.push(entry.profileId);
         lastRefreshByProfileId[entry.profileId] = attemptedAt;
-
-        // Push the single refreshed profile upstream immediately so sibling
-        // devices see the new refresh_token without waiting for the trailing
-        // full-store sync at the end of this run.
-        if (cloudEnabled) {
-          await pushProfileCloudUpdate(options, entry.profileId, nextStore.profiles[entry.profileId]);
-        }
       }
     } catch (error) {
       if (isRefreshTokenReusedError(error)) {
@@ -2137,6 +2311,7 @@ async function doRunTokenKeepalive(options, deps = {}) {
     exportedRuntime,
     storeMode: cloudContext.config.storeMode,
     cloudPrePullError,
+    absorbedExternalUpdateCount,
     state: await loadDashboardState(options, deps),
   };
 }
@@ -2148,9 +2323,7 @@ function mergeProfileByFreshestExpiry(localCredential, remoteCredential) {
   if (!remoteCredential) {
     return localCredential;
   }
-  const localExpires = resolveExpiresAt(localCredential) ?? 0;
-  const remoteExpires = resolveExpiresAt(remoteCredential) ?? 0;
-  return remoteExpires > localExpires
+  return isCredentialNewerThan(remoteCredential, localCredential)
     ? mergeRefreshedCredential(localCredential, remoteCredential)
     : localCredential;
 }
@@ -2322,14 +2495,13 @@ export async function switchProfile(options, profileId, deps = {}) {
 
   let exportCredential = credential;
   if (credential?.type === "oauth") {
-    const resolved = deps.refreshImpl
-      ? await resolveCredentialToken(credential, {
-        proxyConfig: deps.proxyConfig,
-        refreshImpl: deps.refreshImpl,
-      })
-      : await resolveCredentialToken(credential, {
-        proxyConfig: deps.proxyConfig,
-      });
+    const resolved = await resolveProfileTokenWithCloud(
+      options,
+      profileId,
+      credential,
+      deps,
+      { forceRefresh: false },
+    );
     if (resolved.updated) {
       exportCredential = resolved.credential;
       await updateAuthStore(options, (nextStore) => {
@@ -2362,14 +2534,13 @@ export async function switchCodexProfile(options, profileId, deps = {}) {
 
   let exportCredential = credential;
   let nextStore = store;
-  const resolved = deps.refreshImpl
-    ? await resolveCredentialToken(credential, {
-      proxyConfig: deps.proxyConfig,
-      refreshImpl: deps.refreshImpl,
-    })
-    : await resolveCredentialToken(credential, {
-      proxyConfig: deps.proxyConfig,
-    });
+  const resolved = await resolveProfileTokenWithCloud(
+    options,
+    profileId,
+    credential,
+    deps,
+    { forceRefresh: false },
+  );
 
   if (resolved.updated) {
     exportCredential = resolved.credential;
