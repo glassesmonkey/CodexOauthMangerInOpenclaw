@@ -3813,6 +3813,8 @@ test("renderHtml exposes accounts view toggle and compact toolbar structure", ()
   assert.match(html, /查看可用账号明细/);
   assert.match(html, /id="runtimeAuthTargetsValue"/);
   assert.match(html, /同步到的 OpenClaw auth/);
+  assert.match(html, /打开授权页/);
+  assert.match(html, /复制登录链接/);
   assert.match(html, /id="sessionOverridesValue"/);
   assert.match(html, /自动会话覆盖/);
   assert.match(html, /const PRIMARY_RECOMMENDATION_MIN_REMAINING_PERCENT = 5;/);

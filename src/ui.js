@@ -4985,6 +4985,27 @@ export function renderHtml() {
             }
           });
           actions.appendChild(openButton);
+          const copyButton = document.createElement("button");
+          copyButton.type = "button";
+          copyButton.className = "button-secondary";
+          copyButton.textContent = "复制登录链接";
+          copyButton.addEventListener("click", async () => {
+            copyButton.disabled = true;
+            const previousText = copyButton.textContent;
+            try {
+              await copyTextToClipboard(task.authUrl);
+              copyButton.textContent = "已复制";
+              setFlash("登录链接已复制，可以手动粘贴到浏览器打开。", "success");
+            } catch (error) {
+              setFlash(String(error instanceof Error ? error.message : error), "danger");
+            } finally {
+              window.setTimeout(() => {
+                copyButton.disabled = false;
+                copyButton.textContent = previousText;
+              }, 1200);
+            }
+          });
+          actions.appendChild(copyButton);
           shell.appendChild(actions);
         }
 
@@ -6191,6 +6212,27 @@ export function renderHtml() {
           setBusy(false, "当前 Codex 凭据已吸收", "success");
         } catch (error) {
           setBusy(false, String(error instanceof Error ? error.message : error), "danger");
+        }
+      }
+
+      async function copyTextToClipboard(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+
+        const input = document.createElement("textarea");
+        input.value = text;
+        input.setAttribute("readonly", "");
+        input.style.position = "fixed";
+        input.style.left = "-9999px";
+        input.style.top = "0";
+        document.body.appendChild(input);
+        input.select();
+        const copied = document.execCommand("copy");
+        input.remove();
+        if (!copied) {
+          throw new Error("浏览器拒绝复制，请手动选中授权链接。");
         }
       }
 
